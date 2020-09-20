@@ -12,6 +12,5 @@ if grep -q PINTOS_ROOT $bashrc; then
 fi
 
 # add environment vars
-cd ../
-line="export PINTOS_ROOT=$PWD/pintos\nexport PATH=\$PINTOS_ROOT/src/utils:\$PATH"
+line="export PINTOS_ROOT=$PWD\nexport PATH=\$PINTOS_ROOT/src/utils:\$PATH"
 echo "$line" | sudo tee -a $bashrc
