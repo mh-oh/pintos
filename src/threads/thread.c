@@ -215,6 +215,14 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /* When a thread is created that has a higher priority
+     than the currently running thread, the current thread should
+     immediately yield the processor to the new thread. */
+  //if (t->priority > thread_get_priority ())
+  //  thread_yield ();
+  /* The function thread_unlbock already forces the running
+     thread to yield the CPU. */
+
   return tid;
 }
 
@@ -253,6 +261,16 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
+
+  /* When a thread is added to the ready list that has a higher
+     priority than the currently running thread, the current thread
+     should immediately yield the processor to the new thread. */
+  if (thread_current () != idle_thread)
+    {
+      if (t->priority > thread_get_priority ())
+        thread_yield ();
+    }
+
   intr_set_level (old_level);
 }
 
@@ -397,7 +415,18 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  /* Apparently, this currently runnnig thread
+     has the highest priority. */
+  bool is_priority_lowered
+    = thread_get_priority () > new_priority;
+  
   thread_current ()->priority = new_priority;
+
+  /* Lowering the priority of currently running thread
+     such that it no longer has the highest priority must cause
+     it to immediately yield the CPU. */
+  if (is_priority_lowered)
+    thread_yield ();
 }
 
 /* Returns the current thread's priority. */
@@ -555,7 +584,15 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    {
+      /* Among the ready threads, the highest priority thread
+         should be scheduled to run first.*/
+      struct thread *t
+        = list_entry (list_max (&ready_list, thread_priority_less, NULL),
+                      struct thread, elem);
+      list_remove(&t->elem);
+      return t;
+    }
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -644,3 +681,13 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+/* Compares two priorities. If less, returns true. */
+bool
+thread_priority_less (const struct list_elem *a,
+                      const struct list_elem *b,
+                      void *aux UNUSED)
+{
+  return list_entry (a, struct thread, elem)->priority <
+         list_entry (b, struct thread, elem)->priority;
+}
