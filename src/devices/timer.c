@@ -24,6 +24,17 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+/* List of sleeping processes, that is, processes
+   who previously called timer_sleep() and became blocked. */
+static struct list sleep_list;
+
+/* Wake-up time of the thread who should wake up "first"
+   among sleeping thread. */
+static int64_t earliest_wakeup_ticks;
+
+#define EARLIER(T1, T2) \
+        ((T1 > T2) ? T2 : T1)
+
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
@@ -92,8 +103,20 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+  enum intr_level old_level = intr_disable ();
+
+  int64_t wakeup_ticks = start + ticks;
+  struct thread *cur = thread_current ();
+
+  cur->wakeup_ticks = wakeup_ticks;
+  list_push_back (&sleep_list, &cur->elem);
+  thread_block ();
+
+  earliest_wakeup_ticks
+    = EARLIER (earliest_wakeup_ticks, wakeup_ticks);
+
+  intr_set_level (old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -172,6 +195,30 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+
+  if (ticks >= earliest_wakeup_ticks)
+    {
+      /* Since at least one thread is awakened,
+         `earliest_wakeup_ticks' may need to be updated. */
+      earliest_wakeup_ticks = INT64_MAX;
+      struct list_elem* e = list_begin (&sleep_list);
+      while (e != list_end (&sleep_list)) 
+        {
+          int64_t wakeup_ticks = list_entry (e, struct thread, elem)->wakeup_ticks;
+          if (ticks >= wakeup_ticks)
+            {
+              /* Wake up this thread */
+              e = list_remove (e);
+              thread_unblock (list_entry (e, struct thread, elem));
+            }
+          else
+            {
+              earliest_wakeup_ticks
+                = EARLIER (earliest_wakeup_ticks, wakeup_ticks);
+              e = list_next (e);
+            }
+        }
+    }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
