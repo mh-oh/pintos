@@ -415,18 +415,23 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  /* Apparently, this currently runnnig thread
-     has the highest priority. */
-  bool is_priority_lowered
-    = thread_get_priority () > new_priority;
-  
-  thread_current ()->priority = new_priority;
+  struct thread *cur = thread_current ();
 
-  /* Lowering the priority of currently running thread
-     such that it no longer has the highest priority must cause
-     it to immediately yield the CPU. */
-  if (is_priority_lowered)
-    thread_yield ();
+  /* There is no donation, thus it is normal case. */
+  if (list_empty (&cur->donor_list))
+    {
+      /* Apparently, this currently runnnig thread
+         has the highest priority. */
+      bool is_priority_lowered = cur->priority > new_priority;
+      cur->priority = new_priority;
+      /* Lowering the priority of currently running thread
+         such that it no longer has the highest priority must cause
+         it to immediately yield the CPU. */
+      if (is_priority_lowered)
+        thread_yield ();
+    }
+  else
+    cur->original_priority = new_priority;
 }
 
 /* Returns the current thread's priority. */
