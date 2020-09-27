@@ -45,6 +45,10 @@ bool
 semaphore_elem_less (const struct list_elem *,
                      const struct list_elem *,
                      void *);
+bool
+donor_list_elem_less (const struct list_elem *,
+                      const struct list_elem *,
+                      void *);
 
 /* Optimization barrier.
 

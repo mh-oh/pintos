@@ -93,6 +93,12 @@ struct thread
     /* Owned by thread.c. */
     int64_t wakeup_ticks;               /* Wake-up ticks since OS booted. */
 
+    /* Owned by thread.c. */
+    int original_priority;              /* Original priority */
+    struct list donor_list;             /* Priority donors */
+    struct list_elem donor_list_elem;
+    struct lock *wait_on;               /* A lock that blocked me */
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
@@ -138,6 +144,9 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+
+void thread_donate_priority (struct thread *);
+void thread_recall_donation (struct thread *);
 
 int thread_get_nice (void);
 void thread_set_nice (int);

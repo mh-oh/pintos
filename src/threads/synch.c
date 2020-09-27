@@ -210,7 +210,31 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  struct thread *cur = thread_current ();
+  cur->wait_on = lock;
+
+  /* When `lock' has a holder who has a lower priority
+     than current thread, this thread will surely be blocked.
+     Thus, it must donate its priority before blocked. */
+  struct thread *t = lock->holder;
+  if (t != NULL &&
+      t->priority < thread_get_priority ())
+    {
+      if (list_empty (&t->donor_list))
+        {
+          /* If donor list is empty, the thread has never
+             received a donation, or all donations were withdrawn.
+             Therefore, it is needed to backup its own priority. */
+          t->original_priority = t->priority;
+        }
+      t->priority = cur->priority;
+      /* Remember the current thread as a donor */      
+      list_push_back (&t->donor_list, &cur->donor_list_elem);
+    }
+
   sema_down (&lock->semaphore);
+  cur->wait_on = NULL;
+
   lock->holder = thread_current ();
 }
 
@@ -244,6 +268,46 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
+
+  struct thread *cur = thread_current ();
+  struct list *list = &cur->donor_list;
+
+  /* If there are donors */
+  if (!list_empty (list))
+    {
+      struct list_elem *max = list_begin (list);
+      struct list_elem *e;
+      for (e = max; e != list_end (list);
+           /**/)
+        {
+          struct thread *donor
+            = list_entry (e, struct thread,
+                          donor_list_elem);
+          /* Finds all donor threads wating for this lock
+             and removes all of them. */
+          if (donor->wait_on == lock)
+            e = list_remove (e);
+          else
+            {
+              /* Finds max prioirty donor thread except for those
+                 who were wating for this lock. */
+              if (donor_list_elem_less (max, e, NULL))
+                max = e;
+              e = list_next (e);
+            }
+        }
+      /* If there are no more donors related to this lock,
+         reset priority. */
+      if (list_empty (list))
+        cur->priority = cur->original_priority;
+      else
+        {
+          struct thread *t
+            = list_entry (max, struct thread,
+                          donor_list_elem);
+          cur->priority = t->priority;
+        }
+    }
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
@@ -380,4 +444,13 @@ semaphore_elem_less (const struct list_elem *a,
                   struct thread, elem);
 
   return thread_a->priority < thread_b->priority;
+}
+
+bool
+donor_list_elem_less (const struct list_elem *a,
+                      const struct list_elem *b,
+                      void *aux UNUSED)
+{
+  return list_entry (a, struct thread, donor_list_elem)->priority <
+         list_entry (b, struct thread, donor_list_elem);
 }
