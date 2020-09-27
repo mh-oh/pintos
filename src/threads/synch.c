@@ -210,6 +210,8 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  static size_t nested_depth = 8;
+
   struct thread *cur = thread_current ();
   cur->wait_on = lock;
 
@@ -232,12 +234,12 @@ lock_acquire (struct lock *lock)
       list_push_back (&t->donor_list, &cur->donor_list_elem);
 
       /* Nested donation */
-      while (t->wait_on != NULL)
+      size_t i = 0;
+      while (t->wait_on != NULL && i < nested_depth)
         {
           t = t->wait_on->holder;
-          if (t == NULL)
-            break;
           t->priority = cur->priority;
+          i++;
         }
     }
 
