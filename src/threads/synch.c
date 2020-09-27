@@ -230,6 +230,15 @@ lock_acquire (struct lock *lock)
       t->priority = cur->priority;
       /* Remember the current thread as a donor */      
       list_push_back (&t->donor_list, &cur->donor_list_elem);
+
+      /* Nested donation */
+      while (t->wait_on != NULL)
+        {
+          t = t->wait_on->holder;
+          if (t == NULL)
+            break;
+          t->priority = cur->priority;
+        }
     }
 
   sema_down (&lock->semaphore);
