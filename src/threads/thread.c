@@ -269,10 +269,20 @@ thread_unblock (struct thread *t)
   /* When a thread is added to the ready list that has a higher
      priority than the currently running thread, the current thread
      should immediately yield the processor to the new thread. */
-  if (thread_current () != idle_thread)
+  if (thread_current () != idle_thread &&
+      t->priority > thread_get_priority ())
     {
-      if (t->priority > thread_get_priority ())
+      if (!intr_context ())
         thread_yield ();
+      else
+        {
+          /* In the external interrupt context,
+             do not use thread_yield, but intr_yield_on_return. */
+          /* It is because thread_yield should be invoked
+             only when the running thread is not in the external
+             interrupt context. */
+          intr_yield_on_return ();
+        }
     }
 
   intr_set_level (old_level);
