@@ -218,8 +218,10 @@ lock_acquire (struct lock *lock)
   /* When `lock' has a holder who has a lower priority
      than current thread, this thread will surely be blocked.
      Thus, it must donate its priority before blocked. */
+  /* The advanced scheduler disables priority donation. */
   struct thread *t = lock->holder;
-  if (t != NULL &&
+  if (!thread_mlfqs &&
+      t != NULL &&
       t->priority < thread_get_priority ())
     {
       if (list_empty (&t->donor_list))
@@ -284,7 +286,8 @@ lock_release (struct lock *lock)
   struct list *list = &cur->donor_list;
 
   /* If there are donors */
-  if (!list_empty (list))
+  /* The advanced scheduler disables priority donation. */
+  if (!thread_mlfqs && !list_empty (list))
     {
       struct list_elem *max = list_begin (list);
       struct list_elem *e;

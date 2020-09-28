@@ -99,6 +99,10 @@ struct thread
     struct list_elem donor_list_elem;
     struct lock *wait_on;               /* A lock that blocked me */
 
+    /* Owned by thread.c. */
+    int nice;                           /* mlfqs. */
+    int recent_cpu;                     /* mlfqs, fixed-point. */
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
@@ -156,5 +160,16 @@ int thread_get_load_avg (void);
 bool thread_priority_less (const struct list_elem *,
                            const struct list_elem *,
                            void *);
+
+/* Getters. */
+int mlfqs_priority_formula (struct thread *);
+int mlfqs_recent_cpu_formula (struct thread *);
+int mlfqs_load_avg_formula (void);
+
+/* Setters. */
+void mlfqs_increment_recent_cpu (void);
+void mlfqs_recalc_priority (struct thread *, void *);
+void mlfqs_recalc_recent_cpu (struct thread *, void *);
+void mlfqs_update_load_avg (void);
 
 #endif /* threads/thread.h */
