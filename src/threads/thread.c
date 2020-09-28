@@ -680,9 +680,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  /* The advanced scheduler ignores initial priority. */
-  if (!thread_mlfqs)
-    t->priority = priority;
+  t->priority = priority;
   t->magic = THREAD_MAGIC;
 
   /* Priority donation */
@@ -690,8 +688,14 @@ init_thread (struct thread *t, const char *name, int priority)
   t->wait_on = NULL;
 
   /* Advanced scheduler */
-  t->nice = 0;
-  t->recent_cpu = 0;
+  t->nice
+    = (t != initial_thread)
+      ? thread_current ()->nice         /* From parent thread. */
+      : 0;
+  t->recent_cpu
+    = (t != initial_thread)
+      ? thread_current ()->recent_cpu   /* From parent thread. */
+      : 0;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

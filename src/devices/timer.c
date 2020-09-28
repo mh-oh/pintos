@@ -181,18 +181,18 @@ timer_interrupt (struct intr_frame *args UNUSED)
          fot not-­idle running thread only. */
       mlfqs_increment_recent_cpu ();
 
-      /* For every thread, priority is recalculated
-         every fourth tick. */
-      if (timer_ticks () % 4 == 0)
-        thread_foreach (mlfqs_recalc_priority, NULL);
-      
       /* Once per second, `recent_cpu' is recalculated for
          every thread, and `load_avg' is also updated. */
       if (timer_ticks () % TIMER_FREQ == 0)
         {
-          thread_foreach (mlfqs_recalc_recent_cpu, NULL);
           mlfqs_update_load_avg ();
+          thread_foreach (mlfqs_recalc_recent_cpu, NULL);
         }
+
+      /* For every thread, priority is recalculated
+         every fourth tick. */
+      if (timer_ticks () % 4 == 0)
+        thread_foreach (mlfqs_recalc_priority, NULL);
     }
 }
 
