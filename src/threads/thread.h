@@ -90,6 +90,19 @@ struct thread
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
 
+    /* Owned by thread.c. */
+    int64_t wakeup_ticks;               /* Wake-up ticks since OS booted. */
+
+    /* Owned by thread.c. */
+    int original_priority;              /* Original priority */
+    struct list donor_list;             /* Priority donors */
+    struct list_elem donor_list_elem;
+    struct lock *wait_on;               /* A lock that blocked me */
+
+    /* Owned by thread.c. */
+    int nice;                           /* mlfqs. */
+    int recent_cpu;                     /* mlfqs, fixed-point. */
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
@@ -126,6 +139,9 @@ const char *thread_name (void);
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
 
+void thread_sleep (int64_t wakeup_ticks);
+void thread_wakeup (int64_t ticks);
+
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);
 void thread_foreach (thread_action_func *, void *);
@@ -133,9 +149,27 @@ void thread_foreach (thread_action_func *, void *);
 int thread_get_priority (void);
 void thread_set_priority (int);
 
+void thread_donate_priority (struct thread *);
+void thread_recall_donation (struct thread *);
+
 int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+bool thread_priority_less (const struct list_elem *,
+                           const struct list_elem *,
+                           void *);
+
+/* Getters. */
+int mlfqs_priority_formula (struct thread *);
+int mlfqs_recent_cpu_formula (struct thread *);
+int mlfqs_load_avg_formula (void);
+
+/* Setters. */
+void mlfqs_increment_recent_cpu (void);
+void mlfqs_recalc_priority (struct thread *, void *);
+void mlfqs_recalc_recent_cpu (struct thread *, void *);
+void mlfqs_update_load_avg (void);
 
 #endif /* threads/thread.h */
