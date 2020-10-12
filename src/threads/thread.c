@@ -360,7 +360,7 @@ thread_yield (void)
   intr_set_level (old_level);
 }
 
-/* Suspends execution of the calling thread until until
+/* Suspends execution of the calling thread until
    timer `ticks' reaches `wakeup_ticks'. */
 void
 thread_sleep (int64_t wakeup_ticks)
