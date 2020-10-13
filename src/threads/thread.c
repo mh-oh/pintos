@@ -383,29 +383,37 @@ thread_sleep (int64_t wakeup_ticks)
 void
 thread_wakeup (int64_t ticks)
 {
-  struct list_elem *e;
+  /* There is no thread to wake up. */
+  if (ticks < earliest_wakeup_ticks)
+    return;
+  
   /* At least one thread should wake up. */
-  if (ticks >= earliest_wakeup_ticks)
+  struct list_elem *min = list_begin (&sleep_list);
+  struct list_elem *e;
+  for (e = min; e != list_end (&sleep_list);
+       /**/)
     {
-      /* `earliest_wakeup_ticks' may need to be set again. */
-      earliest_wakeup_ticks = INT64_MAX;
-      for (e = list_begin (&sleep_list); e != list_end (&sleep_list);
-           /**/) 
+      struct thread *t = list_entry (e, struct thread, elem);
+      /* Wake up this thread. */
+      if (ticks >= t->wakeup_ticks)
         {
-          struct thread *t = list_entry (e, struct thread, elem);
+          e = list_remove (e);
+          thread_unblock (t);
+        }
+      else
+        {
+          /* Finds a thread with smallest wakeup_ticks
+             except the threads to wake up. */
+          struct thread *min_t = list_entry (min, struct thread, elem);
+          if (t->wakeup_ticks < min_t->wakeup_ticks)
+            min = e;
           e = list_next (e);
-          if (ticks >= t->wakeup_ticks)
-            {
-              /* Wake up this thread */
-              list_remove (&t->elem);
-              thread_unblock (t);
-            }
-          else
-            {
-              earliest_wakeup_ticks = EARLIER (t->wakeup_ticks);
-            }
         }
     }
+
+  /* There are no sleeping threads left. */
+  if (list_empty (&sleep_list))
+    earliest_wakeup_ticks = INT64_MAX;
 }
 
 /* Invoke function 'func' on all threads, passing along 'aux'.
