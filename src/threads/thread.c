@@ -562,11 +562,8 @@ int   /* fixed-point */
 mlfqs_load_avg_formula (void)
 {
   /* `load_avg' is fixed point real number. */
-  int f01 = i2f (1),
-      f59 = i2f (59),
-      f60 = i2f (60);
-  return add_ff (mul_ff (div_ff (f59, f60), load_avg),
-                 mul_fi (div_ff (f01, f60), mlfqs_ready_threads ()));
+  return div_fi (add_fi (mul_fi (load_avg, 59), mlfqs_ready_threads ()),
+                 60);
 }
 
 /* Increments `recent_cpu' by one at every tick
