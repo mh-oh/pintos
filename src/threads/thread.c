@@ -471,9 +471,13 @@ thread_get_priority (void)
    value. If the running thread no longer has the
    highest priority, yields. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice) 
 {
   struct thread *cur = thread_current ();
+  enum intr_level old_level;
+
+  old_level = intr_disable ();
+
   cur->nice = nice;
   cur->priority = mlfqs_priority_formula (cur);
 
@@ -485,13 +489,23 @@ thread_set_nice (int nice UNUSED)
       if (cur->priority < max->priority)
         thread_yield ();
     }
+  
+  intr_set_level (old_level);
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  return thread_current ()->nice;
+  struct thread *cur = thread_current ();
+  enum intr_level old_level;
+  int nice;
+
+  old_level = intr_disable ();
+  nice = cur->nice;
+  intr_set_level (old_level);
+  
+  return nice;
 }
 
 /* Returns 100 times the system load average,
@@ -499,8 +513,15 @@ thread_get_nice (void)
 int
 thread_get_load_avg (void) 
 {
-  /* `load_avg' is fixed point real number. */
-  return f2i_round_nearest (mul_fi (load_avg, 100));
+  enum intr_level old_level;
+  int load_avg_;
+
+  /* `load_avg' is fixed point. */
+  old_level = intr_disable ();
+  load_avg_ = f2i_round_nearest (mul_fi (load_avg, 100));
+  intr_set_level (old_level);
+
+  return load_avg_;
 }
 
 /* Returns 100 times the current thread's recent_cpu value,
@@ -508,9 +529,16 @@ thread_get_load_avg (void)
 int
 thread_get_recent_cpu (void) 
 {
-  /* `recent_cpu' is fixed point real number. */
-  int recent_cpu = thread_current ()->recent_cpu;
-  return f2i_round_nearest (mul_fi (recent_cpu, 100));
+  struct thread *cur = thread_current ();
+  enum intr_level old_level;
+  int recent_cpu;
+
+  /* `recent_cpu' is fixed point. */
+  old_level = intr_disable ();
+  recent_cpu = f2i_round_nearest (mul_fi (cur->recent_cpu, 100));
+  intr_set_level (old_level);
+
+  return recent_cpu;
 }
 
 /* The number of threads that are either running
