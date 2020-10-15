@@ -295,8 +295,7 @@ lock_release (struct lock *lock)
            /**/)
         {
           struct thread *donor
-            = list_entry (e, struct thread,
-                          donor_list_elem);
+            = list_entry (e, struct thread, donor_list_elem);
           /* Finds all donor threads wating for this lock
              and removes all of them. */
           if (donor->wait_on == lock)
@@ -305,7 +304,9 @@ lock_release (struct lock *lock)
             {
               /* Finds max prioirty donor thread except for those
                  who were wating for this lock. */
-              if (donor_list_elem_less (max, e, NULL))
+              struct thread *max_t
+                = list_entry (max, struct thread, donor_list_elem);
+              if (donor->priority > max_t->priority)
                 max = e;
               e = list_next (e);
             }
@@ -458,13 +459,4 @@ semaphore_elem_less (const struct list_elem *a,
                   struct thread, elem);
 
   return thread_a->priority < thread_b->priority;
-}
-
-bool
-donor_list_elem_less (const struct list_elem *a,
-                      const struct list_elem *b,
-                      void *aux UNUSED)
-{
-  return list_entry (a, struct thread, donor_list_elem)->priority <
-         list_entry (b, struct thread, donor_list_elem);
 }

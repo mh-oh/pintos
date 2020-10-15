@@ -383,29 +383,37 @@ thread_sleep (int64_t wakeup_ticks)
 void
 thread_wakeup (int64_t ticks)
 {
-  struct list_elem *e;
+  /* There is no thread to wake up. */
+  if (ticks < earliest_wakeup_ticks)
+    return;
+  
   /* At least one thread should wake up. */
-  if (ticks >= earliest_wakeup_ticks)
+  struct list_elem *min = list_begin (&sleep_list);
+  struct list_elem *e;
+  for (e = min; e != list_end (&sleep_list);
+       /**/)
     {
-      /* `earliest_wakeup_ticks' may need to be set again. */
-      earliest_wakeup_ticks = INT64_MAX;
-      for (e = list_begin (&sleep_list); e != list_end (&sleep_list);
-           /**/) 
+      struct thread *t = list_entry (e, struct thread, elem);
+      /* Wake up this thread. */
+      if (ticks >= t->wakeup_ticks)
         {
-          struct thread *t = list_entry (e, struct thread, elem);
+          e = list_remove (e);
+          thread_unblock (t);
+        }
+      else
+        {
+          /* Finds a thread with smallest wakeup_ticks
+             except the threads to wake up. */
+          struct thread *min_t = list_entry (min, struct thread, elem);
+          if (t->wakeup_ticks < min_t->wakeup_ticks)
+            min = e;
           e = list_next (e);
-          if (ticks >= t->wakeup_ticks)
-            {
-              /* Wake up this thread */
-              list_remove (&t->elem);
-              thread_unblock (t);
-            }
-          else
-            {
-              earliest_wakeup_ticks = EARLIER (t->wakeup_ticks);
-            }
         }
     }
+
+  /* There are no sleeping threads left. */
+  if (list_empty (&sleep_list))
+    earliest_wakeup_ticks = INT64_MAX;
 }
 
 /* Invoke function 'func' on all threads, passing along 'aux'.
@@ -463,9 +471,13 @@ thread_get_priority (void)
    value. If the running thread no longer has the
    highest priority, yields. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice) 
 {
   struct thread *cur = thread_current ();
+  enum intr_level old_level;
+
+  old_level = intr_disable ();
+
   cur->nice = nice;
   cur->priority = mlfqs_priority_formula (cur);
 
@@ -477,13 +489,23 @@ thread_set_nice (int nice UNUSED)
       if (cur->priority < max->priority)
         thread_yield ();
     }
+  
+  intr_set_level (old_level);
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  return thread_current ()->nice;
+  struct thread *cur = thread_current ();
+  enum intr_level old_level;
+  int nice;
+
+  old_level = intr_disable ();
+  nice = cur->nice;
+  intr_set_level (old_level);
+  
+  return nice;
 }
 
 /* Returns 100 times the system load average,
@@ -491,8 +513,15 @@ thread_get_nice (void)
 int
 thread_get_load_avg (void) 
 {
-  /* `load_avg' is fixed point real number. */
-  return f2i_round_nearest (mul_fi (load_avg, 100));
+  enum intr_level old_level;
+  int load_avg_;
+
+  /* `load_avg' is fixed point. */
+  old_level = intr_disable ();
+  load_avg_ = f2i_round_nearest (mul_fi (load_avg, 100));
+  intr_set_level (old_level);
+
+  return load_avg_;
 }
 
 /* Returns 100 times the current thread's recent_cpu value,
@@ -500,9 +529,16 @@ thread_get_load_avg (void)
 int
 thread_get_recent_cpu (void) 
 {
-  /* `recent_cpu' is fixed point real number. */
-  int recent_cpu = thread_current ()->recent_cpu;
-  return f2i_round_nearest (mul_fi (recent_cpu, 100));
+  struct thread *cur = thread_current ();
+  enum intr_level old_level;
+  int recent_cpu;
+
+  /* `recent_cpu' is fixed point. */
+  old_level = intr_disable ();
+  recent_cpu = f2i_round_nearest (mul_fi (cur->recent_cpu, 100));
+  intr_set_level (old_level);
+
+  return recent_cpu;
 }
 
 /* The number of threads that are either running
@@ -554,11 +590,8 @@ int   /* fixed-point */
 mlfqs_load_avg_formula (void)
 {
   /* `load_avg' is fixed point real number. */
-  int f01 = i2f (1),
-      f59 = i2f (59),
-      f60 = i2f (60);
-  return add_ff (mul_ff (div_ff (f59, f60), load_avg),
-                 mul_fi (div_ff (f01, f60), mlfqs_ready_threads ()));
+  return div_fi (add_fi (mul_fi (load_avg, 59), mlfqs_ready_threads ()),
+                 60);
 }
 
 /* Increments `recent_cpu' by one at every tick
