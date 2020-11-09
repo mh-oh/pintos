@@ -17,40 +17,54 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "devices/timer.h"   /* For simple `process_wait' implementation. Remove later. */
 
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool load (const char *exec_path, void (**eip) (void), void **esp);
+static void init_stack (void **esp, char *cmdline);
+static void push_stack (void **esp, void *src, size_t size);
 
 /* Starts a new thread running a user program loaded from
-   FILENAME.  The new thread may be scheduled (and may even exit)
+   CMDLINE.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *cmdline) 
 {
-  char *fn_copy;
+  char *fn_copy;   /* Used later the thread is scheduled. */
   tid_t tid;
+  char *exec_path, *save_ptr;
 
-  /* Make a copy of FILE_NAME.
+  /* Make a copy of CMDLINE.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  strlcpy (fn_copy, cmdline, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  /* Get the executable path name. */
+  exec_path = palloc_get_page (0);
+  if (exec_path == NULL)
+    return TID_ERROR;
+  strlcpy (exec_path, cmdline, PGSIZE);
+  exec_path = strtok_r (exec_path, " ", &save_ptr);
+
+  /* Create a new thread to execute EXEC_PATH */
+  tid = thread_create (exec_path, PRI_DEFAULT, start_process, fn_copy);
+
+  palloc_free_page (exec_path);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+
   return tid;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *cmdline_)
 {
-  char *file_name = file_name_;
+  char *cmdline = cmdline_;
   struct intr_frame if_;
   bool success;
 
@@ -59,10 +73,14 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (thread_name (), &if_.eip, &if_.esp);
+
+  /* Initialize stack with passed arguments. */
+  if (success)
+    init_stack (&if_.esp, cmdline);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
+  palloc_free_page (cmdline);
   if (!success) 
     thread_exit ();
 
@@ -74,6 +92,50 @@ start_process (void *file_name_)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+}
+
+/* Tokenizes CMDLINE and puts the arguments of the process's
+   initial function on the stack. */
+static void
+init_stack (void **esp, char *cmdline)
+{
+  char *argv[LOADER_ARGS_LEN];
+  int argc = 0;
+  
+  void *null = NULL;
+  char *token, *save_ptr;
+
+  /* Argument strings. */
+  for (token = strtok_r (cmdline, " ", &save_ptr); token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr))
+    {
+      if (argc > LOADER_ARGS_LEN)
+        PANIC ("Command line arguments overflow");
+      push_stack (esp, token, strlen (token) + 1);
+      argv[argc++] = *esp;
+    }
+
+  /* Word-align. */
+  push_stack (esp, &null, (size_t) *esp % 4);
+  /* Null pointer sentinel. */
+  push_stack (esp, &null, sizeof (char *));
+  
+  /* Address of each argument. */
+  int i;
+  for (i = argc - 1; i >= 0; i--)
+    push_stack (esp, &argv[i], sizeof (char *));
+
+  push_stack (esp, &*esp, sizeof (char **));   /* argv */
+  push_stack (esp, &argc, sizeof (int));       /* argc */
+  push_stack (esp, &null, sizeof (void (*) (void)));   /* return address. */
+}
+
+/* Helper routine. */
+static void
+push_stack (void **esp, void *src, size_t size)
+{
+  memcpy (*esp - size, src, size);
+  *esp -= size;
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -88,6 +150,8 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  /* Not implemented yet. */
+  timer_sleep (TIMER_FREQ * 1);   /* Sleep for one second. */
   return -1;
 }
 
@@ -206,7 +270,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (const char *exec_path, void (**eip) (void), void **esp) 
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -222,10 +286,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  file = filesys_open (exec_path);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", exec_path);
       goto done; 
     }
 
@@ -238,7 +302,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: error loading executable\n", exec_path);
       goto done; 
     }
 
