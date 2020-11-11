@@ -46,7 +46,7 @@ static sys_wrapper_func *sys_wrap_funcs[SYSCALL_CNT];
    Every user memory access required by system call must be done
    using these helper functions. */
 static long copy_from_user (void *, const void *, size_t);
-static void copy_to_user (void *, const void *, size_t);
+static long copy_to_user (void *, const void *, size_t);
 static long strncpy_from_user (char *, const char *, size_t);
 
 static void bad_user_access (void);
@@ -159,14 +159,14 @@ put_user (uint8_t *udst, uint8_t byte)
    If USRC points to kernel memory or causes page fault,
    returns -1, otherwise returns the number of bytes read. */
 static long
-copy_from_user (void *udst_, const void *usrc_, size_t size)
+copy_from_user (void *kdst_, const void *usrc_, size_t size)
 {
-  uint8_t* udst = udst_;
+  uint8_t* kdst = kdst_;
   const uint8_t* usrc = usrc_;
   long res = 0;
   int byte;
 
-  ASSERT (udst != NULL || size == 0);
+  ASSERT (kdst != NULL || size == 0);
   ASSERT (usrc != NULL || size == 0);
 
   for (; size > 0; size--, res++)
@@ -179,7 +179,33 @@ copy_from_user (void *udst_, const void *usrc_, size_t size)
       if ((byte = get_user (usrc + res)) == SYS_BAD_ADDR)
         bad_user_access ();
       
-      udst[res] = (uint8_t) byte;
+      kdst[res] = (uint8_t) byte;
+    }
+  return res;
+}
+
+/* Writes SIZE bytes from kernel virtual address KSRC to UDST.
+   If UDST points to kernel memory or causes page fault,
+   returns -1, otherwise returns the number of bytes written. */
+static long
+copy_to_user (void *udst_, const void *ksrc_, size_t size)
+{
+  uint8_t* udst = udst_;
+  const uint8_t* ksrc = ksrc_;
+  long res = 0;
+
+  ASSERT (udst != NULL || size == 0);
+  ASSERT (ksrc != NULL || size == 0);
+
+  for (; size > 0; size--, res++)
+    {
+      /* Assumes that the user address has already been verified
+         to be below PHYS_BASE. */
+      if (!is_user_vaddr (udst + res))
+        bad_user_access ();
+      /* A memory access causes page fault. */
+      if (!put_user (udst + res, ksrc[res]))
+        bad_user_access ();
     }
   return res;
 }
@@ -192,13 +218,13 @@ copy_from_user (void *udst_, const void *usrc_, size_t size)
    returns -1, otherwise returns the length of SRC, not including
    the null terminator. */
 static long
-strncpy_from_user (char *udst, const char *usrc_, size_t size)
+strncpy_from_user (char *kdst, const char *usrc_, size_t size)
 {
-  const uint8_t *usrc = usrc_;
+  const char *usrc = usrc_;
 	long res = 0;
   int byte;
 
-  ASSERT (udst != NULL);
+  ASSERT (kdst != NULL);
   ASSERT (usrc != NULL);
 
   if (!size)
@@ -214,12 +240,12 @@ strncpy_from_user (char *udst, const char *usrc_, size_t size)
       if ((byte = get_user (usrc + res)) == SYS_BAD_ADDR)
         bad_user_access ();
       
-		  udst[res] = (char) byte;
+		  kdst[res] = (char) byte;
 		  if (!byte)
 		  	return res;
     }
 
-  udst[--res] = '\0';
+  kdst[--res] = '\0';
   return res;
 }
 
@@ -483,7 +509,7 @@ sys_close (int fd_no)
   lock_acquire(&fs_lock);
   file_close (fd->file);
   lock_release (&fs_lock);
-  
+
   list_remove (&fd->fd_list_elem);
   free (fd);
 }
