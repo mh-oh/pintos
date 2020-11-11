@@ -9,6 +9,7 @@
 #include "threads/malloc.h"
 #include "userprog/process.h"
 #include "devices/shutdown.h"
+#include "devices/input.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 
@@ -33,6 +34,21 @@ static void sys_write_wrapper    (struct intr_frame *);
 static void sys_seek_wrapper     (struct intr_frame *);
 static void sys_tell_wrapper     (struct intr_frame *);
 static void sys_close_wrapper    (struct intr_frame *);
+
+/* Prototypes. */
+void     sys_halt (void);
+void     sys_exit (int);
+pid_t    sys_exec (const char *);
+int      sys_wait (pid_t);
+bool     sys_create (const char *, unsigned);
+bool     sys_remove (const char *);
+int      sys_open (const char *);
+int      sys_filesize (int);
+int      sys_read (int, void *, unsigned);
+int      sys_write (int, const void *, unsigned);
+void     sys_seek (int, unsigned);
+unsigned sys_tell (int);
+void     sys_close (int);
 
 /* In Pintos, system call number and arguments are all 32-bit
    values.  See lib/user/syscall.c */
@@ -220,7 +236,7 @@ copy_to_user (void *udst_, const void *ksrc_, size_t size)
 static long
 strncpy_from_user (char *kdst, const char *usrc_, size_t size)
 {
-  const char *usrc = usrc_;
+  const uint8_t *usrc = (uint8_t *) usrc_;
 	long res = 0;
   int byte;
 
@@ -289,13 +305,13 @@ sys_exit (int status)
 pid_t
 sys_exec (const char *cmdline)
 {
-  char buf[256];
+  char kstr[256];
 
   if (cmdline == NULL)
     bad_user_access ();
 
-  strncpy_from_user (buf, cmdline, 256);
-  return process_execute (buf);
+  strncpy_from_user (kstr, cmdline, 256);
+  return process_execute (kstr);
 }
 
 /* Waits for a child process PID and retrieves the child's
@@ -318,16 +334,16 @@ sys_wait (pid_t pid)
 bool
 sys_create (const char *file, unsigned initial_size)
 {
-  char buf[256];
+  char kstr[256];
   bool res;
 
   if (file == NULL)
     bad_user_access ();
 
-  strncpy_from_user (buf, file, 256);
+  strncpy_from_user (kstr, file, 256);
 
   lock_acquire (&fs_lock);
-  res = filesys_create (buf, initial_size);
+  res = filesys_create (kstr, initial_size);
   lock_release (&fs_lock);
 
   return res;
@@ -341,16 +357,16 @@ sys_create (const char *file, unsigned initial_size)
 bool
 sys_remove (const char *file)
 {
-  char buf[256];
+  char kstr[256];
   bool res;
 
   if (file == NULL)
     bad_user_access ();
 
-  strncpy_from_user (buf, file, 256);
+  strncpy_from_user (kstr, file, 256);
 
   lock_acquire (&fs_lock);
-  res = filesys_remove (buf);
+  res = filesys_remove (kstr);
   lock_release (&fs_lock);
 
   return res;
@@ -403,18 +419,18 @@ sys_open (const char *file)
   struct thread *cur = thread_current ();
   struct file *f;
   struct file_desc *fd;
-  char buf[256];
+  char kstr[256];
 
   if (file == NULL)
     return -1;
 
-  strncpy_from_user (buf, file, 256);
+  strncpy_from_user (kstr, file, 256);
 
   if ((fd = malloc (sizeof (struct file_desc))) == NULL)
     return -1;
 
   lock_acquire (&fs_lock);
-  if ((f = filesys_open (buf)) == NULL)
+  if ((f = filesys_open (kstr)) == NULL)
     {
       free (fd);
       lock_release (&fs_lock);
@@ -455,7 +471,6 @@ int
 sys_read (int fd_no, void *ubuf, unsigned size)
 {
   struct file_desc *fd;
-  char buf[256];
   int res = 0;
 
   if (ubuf == NULL)
@@ -501,7 +516,6 @@ int
 sys_write (int fd_no, const void *ubuf, unsigned size)
 {
   struct file_desc *fd;
-  char buf[256];
   int res = 0;
 
   if (ubuf == NULL)
@@ -536,8 +550,6 @@ void
 sys_seek (int fd_no, unsigned position)
 {
   struct file_desc *fd;
-  int res;
-
   if ((fd = find_file_desc (fd_no)) == NULL)
     return;
   
