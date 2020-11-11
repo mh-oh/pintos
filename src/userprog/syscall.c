@@ -6,8 +6,11 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "threads/malloc.h"
 #include "userprog/process.h"
 #include "devices/shutdown.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -327,10 +330,77 @@ sys_remove (const char *file)
   return res;
 }
 
+/* A file descriptor. */
+struct file_desc
+  {
+    struct list_elem fd_list_elem;   /* List element. */
+    struct file *file;               /* File. */
+    int no;                          /* File descriptor number. */
+  };
+
+/* Finds a file descriptor with the given FD_NO.
+   If not found, returns NULL. */
+static struct file_desc *
+find_file_desc (int fd_no)
+{
+  struct thread *cur = thread_current ();
+  struct list *fd_list = &cur->fd_list;
+  struct list_elem *e;
+  for (e = list_begin (fd_list); e != list_end (fd_list);
+       e = list_next (e))
+    {
+      struct file_desc *fd
+        = list_entry (e, struct file_desc, fd_list_elem);
+      if (fd->no == fd_no)
+        return fd;
+    }
+  return NULL;
+}
+
+/* Opens the file given the path FILE.  It returns a file descriptor
+   of the opend file, or -­1 if open failed.  Two file descriptors are
+   reserved for the console; STDIN_FILENO for standard input and
+   STDOUT_FILENO for standard output.
+
+   Each process has an independent set of file descriptors which is not
+   limited on the number, and these file descriptors are not inherited
+   by child processes.
+
+   It is possible for a single process or different processes to open
+   the same file more than once, and each `open' system call returns a
+   new file descriptor.  That is, different file descriptors can indicates
+   a single open file.  These descriptors are closed independently in
+   each call to close, and they do not share a file position. */
 int
 sys_open (const char *file)
 {
-  //PANIC ("Not implemented yet");
+  struct thread *cur = thread_current ();
+  struct file *f;
+  struct file_desc *fd;
+  char buf[256];
+
+  if (file == NULL)
+    return -1;
+
+  strncpy_from_user (buf, file, 256);
+
+  if ((fd = malloc (sizeof (struct file_desc))) == NULL)
+    return -1;
+
+  lock_acquire (&fs_lock);
+  if ((f = filesys_open (buf)) == NULL)
+    {
+      free (fd);
+      lock_release (&fs_lock);
+      return -1;
+    }
+  
+  fd->file = f;
+  fd->no = cur->next_fd_no++;
+  list_push_back (&cur->fd_list, &fd->fd_list_elem);
+
+  lock_release (&fs_lock);
+  return fd->no;
 }
 
 int
@@ -368,10 +438,36 @@ sys_tell (int fd)
   PANIC ("Not implemented yet");
 }
 
+/* Closes the opened file with the given file descriptor FD_NO. */
 void
-sys_close (int fd)
+sys_close (int fd_no)
 {
-  PANIC ("Not implemented yet");
+  struct file_desc *fd;
+  if ((fd = find_file_desc (fd_no)) == NULL)
+    return;
+  lock_acquire(&fs_lock);
+  file_close (fd->file);
+  list_remove (&fd->fd_list_elem);
+  free (fd);
+  lock_release (&fs_lock);
+}
+
+/* Closes all opened files of the current process. */
+void
+sys_close_all (void)
+{
+  struct thread *cur = thread_current ();
+  struct list *fd_list = &cur->fd_list;
+  while (!list_empty (fd_list))
+    {
+      struct file_desc *fd
+        = list_entry (list_pop_front (fd_list), struct file_desc,
+                      fd_list_elem);
+      lock_acquire (&fs_lock);
+      file_close (fd->file);
+      lock_release (&fs_lock);
+      free (fd);
+    }
 }
 
 /* System call wrapper function implementations.

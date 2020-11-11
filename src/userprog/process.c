@@ -8,6 +8,7 @@
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "userprog/syscall.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -331,6 +332,9 @@ process_exit (void)
          it is terminating first. */
       release_from_parent (child);
     }
+  
+  /* Closes all open files. */
+  sys_close_all ();
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */

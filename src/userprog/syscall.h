@@ -8,5 +8,6 @@
 
 void syscall_init (void);
 void sys_exit (int);
+void sys_close_all (void);
 
 #endif /* userprog/syscall.h */

@@ -113,6 +113,10 @@ struct thread
     struct process *process;            /* My process control block. */
     struct list child_list;             /* List of child process control block. */
 
+    /* Shared between thread.c and syscall.c. */
+    struct list fd_list;                /* List of file descriptors. */
+    int next_fd_no;                     /* Next file descriptor number. */
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
