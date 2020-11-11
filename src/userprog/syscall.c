@@ -446,21 +446,88 @@ sys_filesize (int fd_no)
   return res;
 }
 
+/* Reads the data from opened file.  It returns the number of bytes
+   actually read if FD_NO exists, or -­1 otherwise.  The UBUF is a
+   destination address from which the SIZE-byte file contents are saved.
+   When FD_NO is 0, it will read the data from the keyboard and save
+   it into the UBUF by using input_getc(). */
 int
-sys_read (int fd, void *buffer, unsigned size)
+sys_read (int fd_no, void *ubuf, unsigned size)
 {
-  PANIC ("Not implemented yet");
+  struct file_desc *fd;
+  char buf[256];
+  int res = 0;
+
+  if (ubuf == NULL)
+    return -1;
+
+  if (fd_no != STDIN_FILENO)
+    if ((fd = find_file_desc (fd_no)) == NULL)
+      return -1;
+  
+  if (fd_no != STDIN_FILENO)
+    {
+      void *kbuf = malloc (size);
+
+      lock_acquire (&fs_lock);
+      res = file_read (fd->file, kbuf, size);
+      lock_release (&fs_lock);
+      
+      copy_to_user (ubuf, kbuf, size);
+      free (kbuf);
+    }
+  else
+    {
+      for (; size > 0; size--, res++)
+        {
+          /* Assumes that the user address has already been verified
+             to be below PHYS_BASE. */
+          if (!is_user_vaddr (ubuf + res))
+            bad_user_access ();
+          /* A memory access causes page fault. */
+          if (!put_user (ubuf + res, input_getc ()))
+            bad_user_access ();
+        }
+    }
+  return res;
 }
 
+/* Writes the data from UBUF to the open file FD_NO.  It returns
+   the the number of bytes actually recoreded into the file if
+   succeeds, or -­1 otherwise.  The SIZE is the number of bytes to be
+   written.  When FD_NO is 1, it will write SIZE bytes from UBUF
+   to the console. */
 int
-sys_write (int fd, const void *buffer, unsigned size)
+sys_write (int fd_no, const void *ubuf, unsigned size)
 {
-  if (fd == 1)
+  struct file_desc *fd;
+  char buf[256];
+  int res = 0;
+
+  if (ubuf == NULL)
+    return -1;
+
+  if (fd_no != STDOUT_FILENO)
+    if ((fd = find_file_desc (fd_no)) == NULL)
+      return -1;
+  
+  if (fd_no != STDOUT_FILENO)
     {
-      putbuf (buffer, size);
+      void *kbuf = malloc (size);
+      copy_from_user (kbuf, ubuf, size);
+
+      lock_acquire (&fs_lock);
+      res = file_write (fd->file, kbuf, size);
+      lock_release (&fs_lock);
+      
+      free (kbuf);
+    }
+  else
+    {
+      putbuf (ubuf, size);
       return size;
     }
-  PANIC ("Not implemented yet");
+  return res;
 }
 
 /* Changes the next byte to be read or written in open
