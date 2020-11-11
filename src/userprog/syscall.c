@@ -5,6 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 #include "userprog/process.h"
 #include "devices/shutdown.h"
 
@@ -84,10 +85,15 @@ static void bad_user_access (void);
         SYSCALL_GET_ARGS2(ESP, DST0, DST1); \
         SYSCALL_GET_ARG(ESP, 2, DST2);
 
+/*  */
+static struct lock fs_lock;
+
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+
+  lock_init (&fs_lock);
 
   /* Initialize system call wrappers. */
   sys_wrap_funcs[SYS_HALT]     = sys_halt_wrapper;
@@ -275,16 +281,50 @@ sys_wait (pid_t pid)
   return process_wait ((tid_t) pid);
 }
 
+/* Creates a new file given the path FILE initially
+   INITIAL_SIZE bytes in size.
+   It returns true if successful, or false otherwise.
+   Notice that creating a file does not open the file: opening
+   the new file is performed by `open' system call. */
 bool
 sys_create (const char *file, unsigned initial_size)
 {
-  PANIC ("Not implemented yet");
+  char buf[256];
+  bool res;
+
+  if (file == NULL)
+    bad_user_access ();
+
+  strncpy_from_user (buf, file, 256);
+
+  lock_acquire (&fs_lock);
+  res = filesys_create (buf, initial_size);
+  lock_release (&fs_lock);
+
+  return res;
 }
 
+/* Deletes a file given the path FILE.
+   It returns true if successful, or false otherwise.
+   A file may be removed regardless of whether it is open or closed.
+   Notice that removing a file does not close the file: closing
+   a file is performed by close system call. */
 bool
 sys_remove (const char *file)
 {
-  PANIC ("Not implemented yet");
+  char buf[256];
+  bool res;
+
+  if (file == NULL)
+    bad_user_access ();
+
+  strncpy_from_user (buf, file, 256);
+
+  lock_acquire (&fs_lock);
+  res = filesys_remove (buf);
+  lock_release (&fs_lock);
+
+  return res;
 }
 
 int
