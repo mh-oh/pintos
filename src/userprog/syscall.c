@@ -403,10 +403,21 @@ sys_open (const char *file)
   return fd->no;
 }
 
+/* Returns the size, in bytes, of the open file FD_NO */
 int
-sys_filesize (int fd)
+sys_filesize (int fd_no)
 {
-  PANIC ("Not implemented yet");
+  struct file_desc *fd;
+  int res;
+
+  if ((fd = find_file_desc (fd_no)) == NULL)
+    return -1;
+  
+  lock_acquire (&fs_lock);
+  res = file_length (fd->file);
+  lock_release (&fs_lock);
+
+  return res;
 }
 
 int
@@ -426,16 +437,38 @@ sys_write (int fd, const void *buffer, unsigned size)
   PANIC ("Not implemented yet");
 }
 
+/* Changes the next byte to be read or written in open
+   file FD_NO to POSITION. */
 void
-sys_seek (int fd, unsigned position)
+sys_seek (int fd_no, unsigned position)
 {
-  PANIC ("Not implemented yet");
+  struct file_desc *fd;
+  int res;
+
+  if ((fd = find_file_desc (fd_no)) == NULL)
+    return;
+  
+  lock_acquire (&fs_lock);
+  file_seek (fd->file, position);
+  lock_release (&fs_lock);
 }
 
+/* Returns the position, in byte offset, of the file if
+   FD exists.  If it fails, returns ­-1. */
 unsigned
-sys_tell (int fd)
+sys_tell (int fd_no)
 {
-  PANIC ("Not implemented yet");
+  struct file_desc *fd;
+  unsigned res;
+  
+  if ((fd = find_file_desc (fd_no)) == NULL)
+    return -1;
+  
+  lock_acquire (&fs_lock);
+  res = file_tell (fd->file);
+  lock_release (&fs_lock);
+  
+  return res;
 }
 
 /* Closes the opened file with the given file descriptor FD_NO. */
@@ -443,13 +476,16 @@ void
 sys_close (int fd_no)
 {
   struct file_desc *fd;
+  
   if ((fd = find_file_desc (fd_no)) == NULL)
     return;
+  
   lock_acquire(&fs_lock);
   file_close (fd->file);
+  lock_release (&fs_lock);
+  
   list_remove (&fd->fd_list_elem);
   free (fd);
-  lock_release (&fs_lock);
 }
 
 /* Closes all opened files of the current process. */
