@@ -24,6 +24,9 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+/* Defined in userprog/process.h. */
+struct process;
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -105,6 +108,10 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+
+    /* Shared between thread.c and process.c. */
+    struct process *process;            /* My process control block. */
+    struct list child_list;             /* List of child process control block. */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

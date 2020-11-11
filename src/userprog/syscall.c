@@ -5,6 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/process.h"
 #include "devices/shutdown.h"
 
 static void syscall_handler (struct intr_frame *);
@@ -237,7 +238,9 @@ sys_halt (void)
 void
 sys_exit (int status)
 {
-  printf ("%s: exit(%d)\n", thread_name (), status);
+  struct thread *cur = thread_current ();
+  printf ("%s: exit(%d)\n", cur->name, status);
+  cur->process->exit_status = status;
   thread_exit ();
 }
 
@@ -251,13 +254,25 @@ sys_exit (int status)
 pid_t
 sys_exec (const char *cmdline)
 {
-  PANIC ("Not implemented yet");
+  char buf[256];
+
+  if (cmdline == NULL)
+    bad_user_access ();
+
+  strncpy_from_user (buf, cmdline, 256);
+  return process_execute (buf);
 }
 
+/* Waits for a child process PID and retrieves the child's
+   exit status.
+   If PID is still alive, waits until it terminates.  Then,
+   returns the status that PID passed to `exit'. If PID did not
+   call `exit()', but was terminated by the kernel (e.g. killed
+   due to an exception), should return -1. */
 int
 sys_wait (pid_t pid)
 {
-  PANIC ("Not implemented yet");
+  return process_wait ((tid_t) pid);
 }
 
 bool
@@ -275,7 +290,7 @@ sys_remove (const char *file)
 int
 sys_open (const char *file)
 {
-  PANIC ("Not implemented yet");
+  //PANIC ("Not implemented yet");
 }
 
 int

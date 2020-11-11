@@ -17,12 +17,30 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "devices/timer.h"   /* For simple `process_wait' implementation. Remove later. */
+#include "threads/synch.h"
+#include "threads/malloc.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *exec_path, void (**eip) (void), void **esp);
-static void init_stack (void **esp, char *cmdline);
+static void init_process (struct process *process, tid_t tid);
+static bool init_stack (void **esp, char *cmdline);
 static void push_stack (void **esp, void *src, size_t size);
+
+/* Shared between `process_execute' and `process_start'. */
+struct process_exec_params
+  {
+    /* Used later in `start_process' when scheduled.
+       It is `malloc'ed in `process_execute' but must be `free'ed
+       in `start_process' after command line parsing and stack
+       setup completes. */
+    char *fn_copy;
+    /* The parent process cannot return from the `process_execute'
+       until it knows whether the child process successfully
+       loaded its executable. */
+    struct semaphore load_wait;
+    bool load_success;                  /* Is program load successful? */
+    struct process *process;            /* For parent to retriev a pointer to child process block. */
+  };
 
 /* Starts a new thread running a user program loaded from
    CMDLINE.  The new thread may be scheduled (and may even exit)
@@ -31,16 +49,16 @@ static void push_stack (void **esp, void *src, size_t size);
 tid_t
 process_execute (const char *cmdline) 
 {
-  char *fn_copy;   /* Used later the thread is scheduled. */
+  struct process_exec_params params;
   tid_t tid;
   char *exec_path, *save_ptr;
 
   /* Make a copy of CMDLINE.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  params.fn_copy = palloc_get_page (0);
+  if (params.fn_copy == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, cmdline, PGSIZE);
+  strlcpy (params.fn_copy, cmdline, PGSIZE);
 
   /* Get the executable path name. */
   exec_path = palloc_get_page (0);
@@ -50,21 +68,36 @@ process_execute (const char *cmdline)
   exec_path = strtok_r (exec_path, " ", &save_ptr);
 
   /* Create a new thread to execute EXEC_PATH */
-  tid = thread_create (exec_path, PRI_DEFAULT, start_process, fn_copy);
-
+  tid = thread_create (exec_path, PRI_DEFAULT, start_process, &params);
   palloc_free_page (exec_path);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
 
+  if (tid == TID_ERROR)
+    palloc_free_page (params.fn_copy);
+  else
+    {
+      /* Waits until the child process `tid' successfully loads
+         its executable.
+         See `start_process' implemented below. */
+      sema_init (&params.load_wait, 0);
+      sema_down (&params.load_wait);
+
+      if (!params.load_success)
+        return TID_ERROR;
+
+      /* Add child process. */
+      struct thread *cur = thread_current ();
+      list_push_back (&cur->child_list, &params.process->child_list_elem);
+    }
   return tid;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *cmdline_)
+start_process (void *params_)
 {
-  char *cmdline = cmdline_;
+  struct process_exec_params *params = params_;
+  struct process *process;
   struct intr_frame if_;
   bool success;
 
@@ -77,11 +110,35 @@ start_process (void *cmdline_)
 
   /* Initialize stack with passed arguments. */
   if (success)
-    init_stack (&if_.esp, cmdline);
+    success = init_stack (&if_.esp, params->fn_copy);
 
-  /* If load failed, quit. */
-  palloc_free_page (cmdline);
-  if (!success) 
+  /* Unused. */
+  palloc_free_page (params->fn_copy);
+
+  /* Allocates a process block of this current thread. */
+  if (success)
+    if (!(process = malloc (sizeof (struct process))))
+      success = false;
+
+  /* Setup process block.
+     It is owned by the current tread. */
+  if (success)
+    {
+      struct thread *cur = thread_current ();
+      init_process (process, cur->tid);
+
+      /* Registers this new process to the current thread, and
+         passes a pointer to this process block back to the parent. */
+      params->process = cur->process = process;
+    }
+
+  /* The parent thread doesn't wait for this child proces anymore.
+     See `process_execute' defined above. */
+  params->load_success = success;
+  sema_up (&params->load_wait);
+
+  /* If failed, quit. */
+  if (!success)
     thread_exit ();
 
   /* Start the user process by simulating a return from an
@@ -94,9 +151,30 @@ start_process (void *cmdline_)
   NOT_REACHED ();
 }
 
+/* Does basic initialization of PROCESS. */
+static void
+init_process (struct process *process, tid_t tid)
+{
+  process->tid = tid;
+
+  /* Both the current thread and its parent does not exit yet. */
+  process->owned = true;
+  process->ref_by_parent = true;
+
+  /* To atomically set boolean variables that manage shared
+     memory block. */
+  lock_init (&process->shared_mem_lock);
+  /* The parent can wait until this process exits by
+     sema-"down" it. */
+  sema_init (&process->exit_wait, 0);
+
+  /* Wait has not been performed on this process. */
+  process->wait_done = false;
+}
+
 /* Tokenizes CMDLINE and puts the arguments of the process's
    initial function on the stack. */
-static void
+static bool
 init_stack (void **esp, char *cmdline)
 {
   char *argv[LOADER_ARGS_LEN];
@@ -110,7 +188,8 @@ init_stack (void **esp, char *cmdline)
        token = strtok_r (NULL, " ", &save_ptr))
     {
       if (argc > LOADER_ARGS_LEN)
-        PANIC ("Command line arguments overflow");
+        return false;
+
       push_stack (esp, token, strlen (token) + 1);
       argv[argc++] = *esp;
     }
@@ -128,6 +207,8 @@ init_stack (void **esp, char *cmdline)
   push_stack (esp, &*esp, sizeof (char **));   /* argv */
   push_stack (esp, &argc, sizeof (int));       /* argc */
   push_stack (esp, &null, sizeof (void (*) (void)));   /* return address. */
+
+  return true;
 }
 
 /* Helper routine. */
@@ -136,6 +217,25 @@ push_stack (void **esp, void *src, size_t size)
 {
   memcpy (*esp - size, src, size);
   *esp -= size;
+}
+
+/* Helper routine.
+   Finds a child process with the given CHILD_TID.
+   If not found, returns NULL. */
+struct process *
+process_child (tid_t child_tid)
+{
+  struct list *child_list = &thread_current ()->child_list;
+  struct list_elem *e;
+  for (e = list_begin (child_list); e != list_end (child_list);
+       e = list_next (e))
+    {
+      struct process *child
+        = list_entry (e, struct process, child_list_elem);
+      if (child->tid == child_tid)
+        return child;
+    }
+  return NULL;
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -148,11 +248,57 @@ push_stack (void **esp, void *src, size_t size)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  /* Not implemented yet. */
-  timer_sleep (TIMER_FREQ * 1);   /* Sleep for one second. */
-  return -1;
+  struct process *child;
+
+  if (!(child = process_child (child_tid)))
+    return -1;
+  
+  /* If `process_wait' has already been successfully called
+     for this child process. */
+  if (child->wait_done)
+    return -1;
+
+  sema_down (&child->exit_wait);
+  child->wait_done = true;
+  return child->exit_status;
+}
+
+/* Helper routine.
+   Checks if it is ok to deallocate the given pcb P. */
+static bool
+pcb_free_ok (struct process *p)
+{
+  /* Both the thread that previously owned this process and the
+     parent thread has already terminated. */
+  return !p->owned && !p->ref_by_parent;
+}
+
+/* Helper routine.
+   Changes boolean variables for shared memory control, and
+   if free-condition meets, deallocates the block. */
+static void
+release_from_owner (struct process *p)
+{
+  lock_acquire (&p->shared_mem_lock);
+  p->owned = false;
+  lock_release (&p->shared_mem_lock);
+  if (pcb_free_ok (p))
+    free (p);
+}
+
+/* Helper routine.
+   Changes boolean variables for shared memory control, and
+   if free-condition meets, deallocates the block. */
+static void
+release_from_parent (struct process *p)
+{
+  lock_acquire (&p->shared_mem_lock);
+  p->ref_by_parent = false;
+  lock_release (&p->shared_mem_lock);
+  if (pcb_free_ok (p))
+    free (p);
 }
 
 /* Free the current process's resources. */
@@ -161,6 +307,30 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  /* If a running thread has a process that it has executed.
+     Releases this process from the current thread. */
+  if (cur->process != NULL)
+    {
+      sema_up (&cur->process->exit_wait);
+
+      /* The current thread, that is, a thread that has executed
+         this process no longer owns this process. */
+      release_from_owner (cur->process);
+    }
+  
+  /* Make all child processes release from the current thread. */
+  struct list *child_list = &cur->child_list;
+  while (!list_empty (child_list))
+    {
+      struct process *child
+        = list_entry (list_pop_front (child_list), struct process,
+                      child_list_elem);
+      
+      /* The current process informs its child processes that
+         it is terminating first. */
+      release_from_parent (child);
+    }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
