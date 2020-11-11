@@ -336,6 +336,9 @@ process_exit (void)
   /* Closes all open files. */
   sys_close_all ();
 
+  /* Closes the user program. */
+  file_close (cur->bin);
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -460,12 +463,13 @@ load (const char *exec_path, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (exec_path);
+  t->bin = file = filesys_open (exec_path);
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", exec_path);
       goto done; 
     }
+  file_deny_write (file);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -550,7 +554,6 @@ load (const char *exec_path, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
 
