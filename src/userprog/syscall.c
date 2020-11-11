@@ -475,21 +475,36 @@ sys_read (int fd_no, void *ubuf, unsigned size)
 
   if (ubuf == NULL)
     return -1;
-
-  if (fd_no != STDIN_FILENO)
-    if ((fd = find_file_desc (fd_no)) == NULL)
-      return -1;
+  if (fd_no != STDIN_FILENO
+      && (fd = find_file_desc (fd_no)) == NULL)
+    return -1;
   
   if (fd_no != STDIN_FILENO)
     {
-      void *kbuf = malloc (size);
-
-      lock_acquire (&fs_lock);
-      res = file_read (fd->file, kbuf, size);
-      lock_release (&fs_lock);
+      char kbuf[256];
+      int read_amount, bytes_read;
       
-      copy_to_user (ubuf, kbuf, size);
-      free (kbuf);
+      /* Breaks up the BUFFER and reads up to 256-bytes at once. */
+      while (size > 0)
+        {
+          /* Read is possible up to 256 bytes at once. */
+          read_amount = (size > 256) ? 256 : size;
+
+          lock_acquire (&fs_lock);
+          bytes_read = file_read (fd->file, kbuf, read_amount);
+          lock_release (&fs_lock); 
+
+          /* Data read is saved in KBUF. */
+          copy_to_user (ubuf + res, kbuf, bytes_read);
+
+          /* If 0 bytes read, terminates the loop. */
+          if (bytes_read == 0)
+            break;
+
+          /* Adjusts remaining size and next read position. */
+          res += bytes_read;
+          size -= bytes_read;
+        }
     }
   else
     {
@@ -520,21 +535,36 @@ sys_write (int fd_no, const void *ubuf, unsigned size)
 
   if (ubuf == NULL)
     return -1;
-
-  if (fd_no != STDOUT_FILENO)
-    if ((fd = find_file_desc (fd_no)) == NULL)
-      return -1;
+  if (fd_no != STDOUT_FILENO
+      && (fd = find_file_desc (fd_no)) == NULL)
+    return -1;
   
   if (fd_no != STDOUT_FILENO)
     {
-      void *kbuf = malloc (size);
-      copy_from_user (kbuf, ubuf, size);
-
-      lock_acquire (&fs_lock);
-      res = file_write (fd->file, kbuf, size);
-      lock_release (&fs_lock);
+      char kbuf[256];
+      int write_amount, bytes_written;
       
-      free (kbuf);
+      /* Breaks up the BUFFER and writes up to 256-bytes at once. */
+      while (size > 0)
+        {
+          /* Write is possible up to 256 bytes at once. */
+          write_amount = (size > 256) ? 256 : size;
+          
+          /* Temporarily copies write data into kernel space. */
+          copy_from_user (kbuf, ubuf + res, write_amount);
+
+          lock_acquire (&fs_lock);
+          bytes_written = file_write (fd->file, kbuf, write_amount);
+          lock_release (&fs_lock);
+
+          /* If 0 bytes written, terminates the loop. */
+          if (bytes_written == 0)
+            break;
+
+          /* Adjusts remaining size and next read position. */
+          res += bytes_written;
+          size -= bytes_written;
+        }
     }
   else
     {
