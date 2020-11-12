@@ -105,7 +105,10 @@ static void bad_user_access (void);
         SYSCALL_GET_ARGS2(ESP, DST0, DST1); \
         SYSCALL_GET_ARG(ESP, 2, DST2);
 
-/*  */
+/* It is not safe to call into the file system code
+   provided in the `filesys' directory from multiple threads
+   at once.
+   The file system code is treated as a critical section. */
 static struct lock fs_lock;
 
 void
