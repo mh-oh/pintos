@@ -2,6 +2,7 @@
 #include "lib/user/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include "lib/stdio.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
@@ -432,16 +433,16 @@ sys_open (const char *file)
   lock_acquire (&fs_lock);
   if ((f = filesys_open (kstr)) == NULL)
     {
-      free (fd);
       lock_release (&fs_lock);
+      free (fd);
       return -1;
     }
-  
+  lock_release (&fs_lock);
+
   fd->file = f;
   fd->no = cur->next_fd_no++;
   list_push_back (&cur->fd_list, &fd->fd_list_elem);
 
-  lock_release (&fs_lock);
   return fd->no;
 }
 
