@@ -730,6 +730,14 @@ init_thread (struct thread *t, const char *name, int priority)
       ? thread_current ()->recent_cpu   /* From parent thread. */
       : 0;
 
+  /* Process hierarchy */
+  list_init (&t->child_list);
+  t->process = NULL;
+
+  /* File descriptors. */
+  list_init (&t->fd_list);
+  t->next_fd_no = 2;   /* 0 and 1 are reserved. */
+
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
