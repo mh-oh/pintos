@@ -109,7 +109,7 @@ static void bad_user_access (void);
    provided in the `filesys' directory from multiple threads
    at once.
    The file system code is treated as a critical section. */
-static struct lock fs_lock;
+struct lock fs_lock;
 
 void
 syscall_init (void) 
