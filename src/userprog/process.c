@@ -27,6 +27,12 @@ static void init_process (struct process *process, tid_t tid);
 static bool init_stack (void **esp, char *cmdline);
 static void push_stack (void **esp, void *src, size_t size);
 
+/* It is not safe to call into the file system code
+   provided in the `filesys' directory from multiple threads
+   at once.
+   The file system code is treated as a critical section. */
+extern struct lock fs_lock;
+
 /* Shared between `process_execute' and `process_start'. */
 struct process_exec_params
   {
@@ -107,7 +113,9 @@ start_process (void *params_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+  lock_acquire (&fs_lock);
   success = load (thread_name (), &if_.eip, &if_.esp);
+  lock_release (&fs_lock);
 
   /* Initialize stack with passed arguments. */
   if (success)
@@ -337,7 +345,9 @@ process_exit (void)
   sys_close_all ();
 
   /* Closes the user program. */
+  lock_acquire (&fs_lock);
   file_close (cur->bin);
+  lock_release (&fs_lock);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
