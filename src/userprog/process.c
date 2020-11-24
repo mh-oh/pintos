@@ -20,6 +20,8 @@
 #include "threads/vaddr.h"
 #include "threads/synch.h"
 #include "threads/malloc.h"
+#include "vm/frame.h"
+#include "vm/page.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *exec_path, void (**eip) (void), void **esp);
@@ -466,6 +468,10 @@ load (const char *exec_path, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
+  t->spt = page_create_spt ();
+  if (t->spt == NULL)
+    goto done;
+
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -646,31 +652,52 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
+      struct page *p;
+
+      if ((p = page_make_entry (upage)) == NULL)
+        return false;
+      if (page_read_bytes > 0)
+        {
+          p->type = PG_FILE;
+          p->file = file;
+          p->file_ofs = ofs;
+          //printf ("##### (load_segment) setup spt entry %p: from file=%p, ofs=%d\n", p, p->file, p->file_ofs);
+        }
+      else
+        {
+          p->type = PG_ZERO;
+          //printf ("##### (load_segment) setup spt entry %p: zero\n", p, p->file, p->file_ofs);
+        }
+      
+      p->writable = writable;
+      p->read_bytes = page_read_bytes;
+      p->zero_bytes = page_zero_bytes;
 
       /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
-        return false;
+      //uint8_t *kpage = frame_alloc (PAL_USER);//palloc_get_page (PAL_USER);
+      //if (kpage == NULL)
+      //  return false;
 
       /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+      //if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+      //  {
+      //    palloc_free_page (kpage);
+      //    return false; 
+      //  }
+      //memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
       /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
+      //if (!install_page (upage, kpage, writable)) 
+      //  {
+      //    frame_free (kpage);//palloc_free_page (kpage);
+      //    return false; 
+      //  }
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      ofs += page_read_bytes;
     }
   return true;
 }
@@ -683,14 +710,14 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  kpage = frame_alloc (PAL_USER | PAL_ZERO);//palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
         *esp = PHYS_BASE;
       else
-        palloc_free_page (kpage);
+        frame_free (kpage);//palloc_free_page (kpage);
     }
   return success;
 }

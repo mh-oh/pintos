@@ -5,6 +5,8 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -127,6 +129,7 @@ page_fault (struct intr_frame *f)
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
+  void *fault_page;
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -136,6 +139,7 @@ page_fault (struct intr_frame *f)
      [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
      (#PF)". */
   asm ("movl %%cr2, %0" : "=r" (fault_addr));
+  fault_page = pg_round_down (fault_addr);
 
   /* Turn interrupts back on (they were only off so that we could
      be assured of reading CR2 before it changed). */
@@ -149,12 +153,25 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  struct page *p;
+  if (not_present)
+    {
+      //printf ("##### (page_fault) try loading upage=%p.\n", fault_page);
+      if (!page_load (fault_page))
+        {
+          //printf ("##### (page_fault) load failed.\n");
+          sys_exit (-1);
+        }
+      return;
+    }
+
   /* A page fault in the kernel merely sets EAX to 0xffffffff and
      copies its former value into EIP. This enables returning a -1
      error code from an invalid memory access, which is required
      by `get_user' and `copy_from_user' defined in "userprog/syscall.c". */
   if (!user)
     {
+      //printf ("##### (page_fault) kernel context. returns -1.\n");
       /* When a page fault occurs in a function F, EAX holds the
          address where F is called. EIP points the next instruction
          to execute. */
