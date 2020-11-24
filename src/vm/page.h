@@ -22,6 +22,7 @@ enum page_type
 struct page
   {
     void *upage;   /* User virtual page. */
+    void *kpage;
 
     enum page_type type;
     bool writable;

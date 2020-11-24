@@ -7,6 +7,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "vm/page.h"
+#include "vm/frame.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -156,10 +157,10 @@ page_fault (struct intr_frame *f)
   struct page *p;
   if (not_present)
     {
-      //printf ("##### (page_fault) try loading upage=%p.\n", fault_page);
+      printf ("##### [%d] (page_fault) try loading upage=%p.\n", thread_tid (), fault_page);
       if (!page_load (fault_page))
         {
-          //printf ("##### (page_fault) load failed.\n");
+          printf ("##### [%d] (page_fault) load failed.\n", thread_tid ());
           sys_exit (-1);
         }
       return;
@@ -171,7 +172,7 @@ page_fault (struct intr_frame *f)
      by `get_user' and `copy_from_user' defined in "userprog/syscall.c". */
   if (!user)
     {
-      //printf ("##### (page_fault) kernel context. returns -1.\n");
+      printf ("##### [%d] (page_fault) kernel context. returns -1.\n", thread_tid ());
       /* When a page fault occurs in a function F, EAX holds the
          address where F is called. EIP points the next instruction
          to execute. */
