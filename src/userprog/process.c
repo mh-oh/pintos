@@ -668,12 +668,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           p->type = PG_FILE;
           p->file = file;
           p->file_ofs = ofs;
-          //printf ("##### [%d] (load_segment) setup spt entry %p: from file=%p, ofs=%d\n", thread_tid (), p, p->file, p->file_ofs);
+          printf ("##### [%d] (load_segment) setup spt entry %p: from file=%p, ofs=%d\n", thread_tid (), p, p->file, p->file_ofs);
         }
       else
         {
           p->type = PG_ZERO;
-          //printf ("##### [%d] (load_segment) setup spt entry %p: zero\n", thread_tid (), p, p->file, p->file_ofs);
+          printf ("##### [%d] (load_segment) setup spt entry %p: zero\n", thread_tid (), p);
         }
       
       p->writable = writable;
@@ -714,6 +714,26 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
+  struct page *p;
+  bool success = false;
+  void *upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
+  
+  if (!(p = page_make_entry (upage)))
+    return false;
+  else
+    {
+      p->type = PG_ZERO;
+      p->writable = true;
+      printf ("##### [%d] (setup_stack) setup spt entry %p: zero\n", thread_tid (), p);
+
+      success = page_load (upage);
+      if (success)
+        *esp = PHYS_BASE;
+      else
+        PANIC ("?????????");
+    }
+  return success;
+  /*
   uint8_t *kpage;
   bool success = false;
 
@@ -727,6 +747,7 @@ setup_stack (void **esp)
         frame_free (kpage);//palloc_free_page (kpage);
     }
   return success;
+  */
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel

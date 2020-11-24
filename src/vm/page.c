@@ -53,8 +53,9 @@ static void
 page_hash_free (struct hash_elem *e, void *aux UNUSED)
 {
   struct page *p = hash_entry (e, struct page, hash_elem);
+  
   free (p);
-  //printf ("##### [%d] (page_hash_free) freeing spt entry %p\n", thread_tid (), p);
+  printf ("##### [%d] (page_hash_free) freeing spt entry %p\n", thread_tid (), p);
 }
 
 struct page *
@@ -72,12 +73,12 @@ page_make_entry (void *upage)
     PANIC ("cannot create supplemental page table entry.");
   
   p->upage = upage;
-  p->kpage = NULL;
+  p->owner = cur;
   p->type = PG_UNKNOWN;
   p->file = NULL;
 
   hash_insert (cur->spt, &p->hash_elem);
-  //printf ("##### [%d] (page_make_entry) malloced spt entry %p for upage=%p\n", thread_tid (), p, p->upage);
+  printf ("##### [%d] (page_make_entry) malloced spt entry %p for upage=%p\n", thread_tid (), p, p->upage);
   return p;
 }
 
@@ -115,7 +116,8 @@ page_load (void *upage)
 
   //ASSERT (p->frame == NULL);
 
-  kpage = frame_alloc (PAL_USER);
+  printf ("##### [%d] (page_load) loading upage=%p, type=%d\n", thread_tid (), p->upage, p->type);
+  kpage = frame_alloc (PAL_USER, p);
   if (p->type == PG_FILE)
     {
       ASSERT (p->file != NULL);
@@ -139,7 +141,7 @@ page_load (void *upage)
       memset (kpage, 0, PGSIZE);
     }
 
-  printf ("##### [%d] (page_load) kpage=%p is initialized: type=%d\n", thread_tid (), kpage, p->type);
+  printf ("##### [%d] (page_load) kpage=%p is initialized for upage=%p, type=%d\n", thread_tid (), kpage, p->upage, p->type);
 
   if (!install_page (upage, kpage, p->writable)) 
     {

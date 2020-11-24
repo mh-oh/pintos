@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <hash.h>
+#include "threads/thread.h"
 #include "filesys/file.h"
 
 /* Defined in filesys/file.c. */
@@ -22,7 +23,8 @@ enum page_type
 struct page
   {
     void *upage;   /* User virtual page. */
-    void *kpage;
+
+    struct thread *owner;
 
     enum page_type type;
     bool writable;
@@ -31,6 +33,8 @@ struct page
     off_t file_ofs;
     size_t read_bytes;
     size_t zero_bytes;
+
+    size_t slot;
 
     struct hash_elem hash_elem;
   };
