@@ -142,7 +142,7 @@ syscall_handler (struct intr_frame *f)
   SYSCALL_GET_NUMBER (esp, &no);
 
   /* Invokes system call wrapper function. */
-  if (no < 0 || no > SYSCALL_CNT)
+  if (no < 0 || no >= SYSCALL_CNT)
     PANIC ("Unknown system call");
   else
     {
