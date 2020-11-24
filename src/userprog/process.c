@@ -317,6 +317,7 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
+  struct hash *spt;
   uint32_t *pd;
 
   /* If a running thread has a process that it has executed.
@@ -350,6 +351,12 @@ process_exit (void)
   lock_acquire (&fs_lock);
   file_close (cur->bin);
   lock_release (&fs_lock);
+
+  spt = cur->spt;
+  if (spt != NULL)
+    page_destroy_spt (spt);
+
+  frame_free_all ();
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */

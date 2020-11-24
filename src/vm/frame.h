@@ -16,6 +16,7 @@ struct frame
 void frame_init (void);
 void *frame_alloc (enum palloc_flags);
 void frame_free (void *);
+void frame_free_all (void);
 struct frame *frame_lookup (void *);
 struct frame *frame_get_victim (void);
 

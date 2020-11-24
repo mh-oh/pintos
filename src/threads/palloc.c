@@ -140,11 +140,12 @@ palloc_free_multiple (void *pages, size_t page_cnt)
   ASSERT (bitmap_all (pool->used_map, page_idx, page_cnt));
   bitmap_set_multiple (pool->used_map, page_idx, page_cnt, false);
 }
-
+#include "threads/thread.h"
 /* Frees the page at PAGE. */
 void
 palloc_free_page (void *page) 
 {
+  //printf ("##### (palloc_free_page) kpage=%p of thread %d is freed\n", page, thread_tid ());
   palloc_free_multiple (page, 1);
 }
 

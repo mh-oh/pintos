@@ -1,5 +1,6 @@
 #include "vm/page.h"
 #include "vm/frame.h"
+#include <string.h>
 #include <debug.h>
 #include <stdio.h>
 #include "threads/thread.h"
@@ -18,7 +19,7 @@ page_create_spt (void)
   if (!spt)
     PANIC ("cannot create supplemental page table.");
   hash_init (spt, page_hash_func, page_hash_less, NULL);
-  //printf ("##### (page_create_spt) created spt %p, plz free it.\n", spt);
+  //printf ("##### (page_create_spt) malloced spt %p, plz free it.\n", spt);
   return spt;
 }
 
@@ -27,6 +28,8 @@ page_destroy_spt (struct hash *spt)
 {
   ASSERT (spt != NULL);
   hash_destroy (spt, page_hash_free);
+  free (spt);
+  //printf ("##### (page_destroy_spt) freeing spt %p\n", spt);
 }
 
 static unsigned
@@ -51,6 +54,7 @@ page_hash_free (struct hash_elem *e, void *aux UNUSED)
 {
   struct page *p = hash_entry (e, struct page, hash_elem);
   free (p);
+  //printf ("##### (page_hash_free) freeing spt entry %p\n", p);
 }
 
 struct page *
@@ -72,7 +76,7 @@ page_make_entry (void *upage)
   p->file = NULL;
 
   hash_insert (cur->spt, &p->hash_elem);
-  //printf ("##### (page_make_entry) created spt entry %p for upage=%p\n", p, p->upage);
+  //printf ("##### (page_make_entry) malloced spt entry %p for upage=%p\n", p, p->upage);
   return p;
 }
 

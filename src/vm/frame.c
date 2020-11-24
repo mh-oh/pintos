@@ -27,11 +27,12 @@ frame_alloc (enum palloc_flags flags)
 
   if ((f = malloc (sizeof (struct frame))) == NULL)
     PANIC ("cannot allocate frame table entry.");
-  
+
   f->kpage = palloc_get_page (flags);
   if (f->kpage != NULL)
     {
       //printf ("##### (frame_alloc) kpage=%p is palloced to thread %d\n", f->kpage, cur->tid);
+      //printf ("##### (frame_alloc) malloced ft entry %p for kpage=%p\n", f, f->kpage);
       f->owner = cur;
       list_push_back (&frame_list, &f->list_elem);
       return f->kpage;
@@ -52,6 +53,29 @@ frame_free (void *kpage)
   list_remove (&f->list_elem);
   palloc_free_page (f->kpage);
   free (f);
+}
+
+void
+frame_free_all (void)
+{
+  struct thread *cur = thread_current ();
+  struct list_elem *e;
+  lock_acquire (&frame_lock);
+  for (e = list_begin (&frame_list); e != list_end (&frame_list);
+       /**/)
+    {
+      struct frame *f
+        = list_entry (e, struct frame, list_elem);
+      if (f->owner == cur)
+        {
+          //printf ("##### (frame_free_all) ft entry %p for kpage=%p is freed\n", f, f->kpage);
+          e = list_remove (e);
+          free (f);
+        }
+      else
+        e = list_next (e);
+    }
+  lock_release (&frame_lock);
 }
 
 struct frame *
