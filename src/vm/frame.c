@@ -42,7 +42,7 @@ frame_alloc (enum palloc_flags flags, struct page *p)
   if (f->kpage != NULL)
     {
       //printf ("##### [%d] (frame_alloc) kpage=%p is palloced to thread %d\n", thread_tid (), f->kpage, p->owner->tid);
-      ////printf ("##### [%d] (frame_alloc) malloced ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
+      //printf ("##### [%d] (frame_alloc) malloced ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
       lock_acquire (&f->lock);
       f->owner = p->owner;
       f->suppl = p;
@@ -65,9 +65,11 @@ frame_alloc (enum palloc_flags flags, struct page *p)
       ASSERT (f->owner == f->suppl->owner);
       //printf ("##### [%d] (frame_alloc) evicting a frame...\n", thread_tid ());
       pagedir_clear_page (f->suppl->owner->pagedir, f->suppl->upage);
-      p->slot = swap_out (f->kpage);
-      p->type = PG_SWAP;
-      //printf ("##### [%d] (frame_alloc) swapped out: kpage=%p of thread %d into slot=%d\n", thread_tid (), f->kpage, f->owner->tid, slot);
+      f->suppl->slot = swap_out (f->kpage);
+      f->suppl->type = PG_SWAP;
+      f->suppl->file = NULL;
+      f->suppl->frame = NULL;
+      //printf ("##### [%d] (frame_alloc) swapped out: kpage=%p of thread %d into slot=%d\n", thread_tid (), f->kpage, f->owner->tid, f->suppl->slot);
       list_remove (&f->list_elem);
       //printf ("##### [%d] (frame_alloc) changed owner of kpage=%p: thread %d to %d\n", thread_tid (), f->kpage, f->owner->tid, cur->tid);
       f->owner = p->owner;
@@ -103,7 +105,7 @@ frame_free_all (void)
   //      = list_entry (e, struct frame, list_elem);
   //    if (f->owner == cur)
   //      {
-  //        ////printf ("##### [%d] (frame_free_all) ft entry %p for kpage=%p is freed\n", thread_tid (), f, f->kpage);
+  //        //printf ("##### [%d] (frame_free_all) ft entry %p for kpage=%p is freed\n", thread_tid (), f, f->kpage);
   //        e = list_remove (e);
   //        free (f);
   //      }
@@ -127,7 +129,10 @@ frame_get_victim (void)
       struct frame *f
         = list_entry (e, struct frame, list_elem);
       if (f->owner->tid == cur->tid)
-        continue;
+        {
+          if (lock_held_by_current_thread (&f->lock))
+            continue;
+        }
       if (!lock_try_acquire (&f->lock))
         continue;
       return f;

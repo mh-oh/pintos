@@ -448,7 +448,22 @@ page_make_entry (void *upage)
   return p;
 }
 
-User virtual page upage에 대해 page를 loading할 때는 page_load와 page_lookup 함수를 이용한다. ***** lazy loading에서 설명 *****
+Here, finding a SPTE associated with given upage is performed by page_lookup. This function returns a pointer to the corresponding SPTE if exists, or NULL otherwise. Therefore, in the function page_make_entry, a request to create an already existing SPTE is denied.
+
+struct page *
+page_lookup (void *upage)
+{
+  struct thread *cur = thread_current ();
+  struct page key;
+  struct hash_elem *e;
+
+  key.upage = upage;
+  e = hash_find (cur->spt, &key.hash_elem);
+
+  return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
+}
+
+User virtual page upage에 대해 page를 loading할 때는 page_load 함수를 이용한다. ***** lazy loading에서 설명 *****
 
 bool page_load (void *);
 struct page *page_lookup (void *);
@@ -528,7 +543,7 @@ frame_alloc (struct page *p)
       return f;
     }
   else
-    // Eviction
+    PANIC ("eviction required. covered later.");
 }
 
 
@@ -719,13 +734,43 @@ page_fault (struct intr_frame *f)
 
 page_load looks up the SPTE that is associated with virtual page that faulted in the process's SPT. 그리고 SPTE p에 FTE와 physical frame을 할당한다 using frame_alloc (p). 이후, p->type에 따라 file이나 swap slot에서 contents를 read하거나 zeros로 fill한다. 마지막으로 install_page 함수를 이용하여 이 process에 user virtual mapping을 추가한다.
 
-/*
 bool
 page_load (void *upage)
 {
-  ...
+  bool success = false;
+  struct page *p = page_lookup (upage);
+  struct frame *f;
+
+  if (!p)
+    return false;
+
+  f = p->frame = frame_alloc (PAL_USER, p);
+  if (p->file != NULL)
+    {
+      size_t read_bytes
+        = file_read_at (p->file, f->kpage, p->read_bytes, p->file_ofs);
+      if (read_bytes != p->read_bytes)
+        {
+          frame_free (f);
+          return false; 
+        }
+      memset (f->kpage + p->read_bytes, 0, p->zero_bytes);
+    }
+  else if (p->slot != BITMAP_ERROR)
+    PANIC ("p should have been once evicted. covered later.");
+  else
+    memset (f->kpage, 0, PGSIZE);
+
+  if (!install_page (upage, f->kpage, p->writable)) 
+    {
+      frame_free (f);
+      return false; 
+    }
+
+  frame_unlock (f);
+
+  return true;
 }
-*/
 
 The function install_page(upage, kpage, writable) adds a mapping from user virtual page to kernel virtual page that is identifying a physical frame to the calling process's pagedir. If writable is true, the user process may modify the page, otherwise, it is read-only. In this function upage must not already be mapped. It returns true on success, false if upage is already mapped or if memory allocation fails.
 

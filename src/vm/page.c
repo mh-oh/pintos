@@ -4,6 +4,7 @@
 #include <string.h>
 #include <debug.h>
 #include <stdio.h>
+#include <bitmap.h>
 #include "threads/thread.h"
 #include "threads/malloc.h"
 #include "threads/vaddr.h"
@@ -20,7 +21,7 @@ page_create_spt (void)
   if (!spt)
     PANIC ("cannot create supplemental page table.");
   hash_init (spt, page_hash_func, page_hash_less, NULL);
-  ////printf ("##### [%d] (page_create_spt) malloced spt %p, plz free it.\n", thread_tid (), spt);
+  //printf ("##### [%d] (page_create_spt) malloced spt %p, plz free it.\n", thread_tid (), spt);
   return spt;
 }
 
@@ -30,7 +31,7 @@ page_destroy_spt (struct hash *spt)
   ASSERT (spt != NULL);
   hash_destroy (spt, page_hash_free);
   free (spt);
-  ////printf ("##### [%d] (page_destroy_spt) freeing spt %p\n", thread_tid (), spt);
+  //printf ("##### [%d] (page_destroy_spt) freeing spt %p\n", thread_tid (), spt);
 }
 
 static unsigned
@@ -90,6 +91,7 @@ page_make_entry (void *upage)
   p->owner = cur;
   p->type = PG_UNKNOWN;
   p->file = NULL;
+  p->slot = BITMAP_ERROR;
 
   hash_insert (cur->spt, &p->hash_elem);
   //printf ("##### [%d] (page_make_entry) malloced spt entry %p for upage=%p\n", thread_tid (), p, p->upage);
@@ -147,9 +149,9 @@ page_load (void *upage)
   struct frame *f;
   f = p->frame = frame_alloc (PAL_USER, p);
   ASSERT (f != NULL);
-  if (p->type == PG_FILE)
+  if (p->file != NULL)
     {
-      ASSERT (p->file != NULL);
+      ASSERT (p->type == PG_FILE);
       if (file_read_at (p->file, f->kpage, p->read_bytes, p->file_ofs)
           != (int) p->read_bytes)
         {
@@ -157,21 +159,24 @@ page_load (void *upage)
           return false; 
         }
       memset (f->kpage + p->read_bytes, 0, p->zero_bytes);
+      //printf ("##### [%d] (page_load) from file: upage=%p, file=%p\n", thread_tid (), p->upage, p->file);
     }
-  else if (p->type == PG_SWAP)
+  else if (p->slot != BITMAP_ERROR)
     {
+      ASSERT (p->type == PG_SWAP);
       swap_in (f->kpage, p->slot);
-      //PANIC ("not implemented yet: swap in.");
-      //ASSERT (p->slot != BITMAP_ERROR);
-      //swap_in (p);
+      p->slot = BITMAP_ERROR;
+      //printf ("##### [%d] (page_load) from slot: upage=%p, slot=%d\n", thread_tid (), p->upage, p->slot);
     }
   else
     {
       ASSERT (p->type == PG_ZERO);
       memset (f->kpage, 0, PGSIZE);
+      //printf ("##### [%d] (page_load) zero: upage=%p\n", thread_tid (), p->upage);
     }
 
-  //printf ("##### [%d] (page_load) kpage=%p is initialized for upage=%p, type=%d\n", thread_tid (), kpage, p->upage, p->type);
+
+  //printf ("##### [%d] (page_load) kpage=%p is initialized for upage=%p, type=%d\n", thread_tid (), f->kpage, p->upage, p->type);
 
   if (!install_page (upage, f->kpage, p->writable)) 
     {

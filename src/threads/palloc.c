@@ -145,7 +145,7 @@ palloc_free_multiple (void *pages, size_t page_cnt)
 void
 palloc_free_page (void *page) 
 {
-  ////printf ("##### [%d] (palloc_free_page) kpage=%p of thread %d is freed\n", thread_tid (), page, thread_tid ());
+  //printf ("##### [%d] (palloc_free_page) kpage=%p of thread %d is freed\n", thread_tid (), page, thread_tid ());
   palloc_free_multiple (page, 1);
 }
 
