@@ -24,7 +24,6 @@ frame_init (void)
 struct frame *
 frame_alloc (enum palloc_flags flags, struct page *p)
 {
-  struct thread *cur = thread_current ();
   struct frame *f;
 
   ASSERT (flags & PAL_USER);
@@ -70,7 +69,6 @@ frame_alloc (enum palloc_flags flags, struct page *p)
       f->suppl->file = NULL;
       f->suppl->frame = NULL;
       //printf ("##### [%d] (frame_alloc) swapped out: kpage=%p of thread %d into slot=%d\n", thread_tid (), f->kpage, f->owner->tid, f->suppl->slot);
-      list_remove (&f->list_elem);
       //printf ("##### [%d] (frame_alloc) changed owner of kpage=%p: thread %d to %d\n", thread_tid (), f->kpage, f->owner->tid, cur->tid);
       f->owner = p->owner;
       f->suppl = p;

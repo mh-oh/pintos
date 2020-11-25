@@ -99,18 +99,10 @@ page_make_entry (void *upage)
 }
 
 void
-page_remove_entry (void *upage)
+page_remove_entry (struct page *p)
 {
-  struct thread *cur = thread_current ();
-  struct page *p;
-
-  ASSERT (cur->spt != NULL);
-  ASSERT (is_user_vaddr (upage));
-  ASSERT (pg_ofs (upage) == 0);
-
-  p = page_lookup (upage);
+  ASSERT (p->owner == thread_current ());
   ASSERT (p != NULL);
-
   struct frame *f = p->frame;
   if (f != NULL) 
     {
@@ -121,10 +113,9 @@ page_remove_entry (void *upage)
           ASSERT (p->frame == NULL); 
         } 
     }
-
   if (p->frame)
     frame_free (p->frame);
-  hash_delete (cur->spt, &p->hash_elem);
+  hash_delete (p->owner->spt, &p->hash_elem);
   free (p);
 }
 
@@ -133,13 +124,11 @@ static bool install_page (void *upage, void *kpage, bool writable);
 bool
 page_load (void *upage)
 {
-  struct page *p;
-  //void *kpage;
-
   ASSERT (is_user_vaddr (upage));
   ASSERT (pg_ofs (upage) == 0);
 
-  if ((p = page_lookup (upage)) == NULL)
+  struct page *p = page_lookup (upage);
+  if (!p)
     return false;
   ASSERT (p->type != PG_UNKNOWN);
 
@@ -152,12 +141,10 @@ page_load (void *upage)
   if (p->file != NULL)
     {
       ASSERT (p->type == PG_FILE);
-      if (file_read_at (p->file, f->kpage, p->read_bytes, p->file_ofs)
-          != (int) p->read_bytes)
-        {
-          frame_free (f);
-          return false; 
-        }
+      size_t read_bytes
+        = file_read_at (p->file, f->kpage, p->read_bytes, p->file_ofs);
+      if (read_bytes != p->read_bytes)
+        goto fail;
       memset (f->kpage + p->read_bytes, 0, p->zero_bytes);
       //printf ("##### [%d] (page_load) from file: upage=%p, file=%p\n", thread_tid (), p->upage, p->file);
     }
@@ -179,14 +166,14 @@ page_load (void *upage)
   //printf ("##### [%d] (page_load) kpage=%p is initialized for upage=%p, type=%d\n", thread_tid (), f->kpage, p->upage, p->type);
 
   if (!install_page (upage, f->kpage, p->writable)) 
-    {
-      frame_free (f);
-      return false; 
-    }
+    goto fail;
 
   frame_unlock (f);
-
   return true;
+
+ fail:
+  frame_free (f);
+  return false;
 }
 
 static bool

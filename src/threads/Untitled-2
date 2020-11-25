@@ -463,10 +463,11 @@ page_lookup (void *upage)
   return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
 }
 
+Function page_remove_entry removes a given SPTE. If FTE is allocated for this SPTE, it is also removed. Importantly, a physical frame associated with this FTE is ``not'' deallocated. This frame will be deallocated by pagedir_destroy when a process exits. There are so many critical cases we have to consider. So page_remove_entry will be covered later.
+
 User virtual page upage에 대해 page를 loading할 때는 page_load 함수를 이용한다. ***** lazy loading에서 설명 *****
 
-bool page_load (void *);
-struct page *page_lookup (void *);
+bool page_load (void *upage);
 
 
 
@@ -549,15 +550,7 @@ frame_alloc (struct page *p)
 
 
 
-*****
-
-void
-frame_free (struct frame *f)
-{
-  ...
-}
-
-
+Function frame_free removes a given FTE. Importantly, a physical frame associated with this FTE is ``not'' deallocated. This frame will be deallocated by pagedir_destroy when a process exits. There are so many critical cases we have to consider. So frame_free will be covered later.
 
 
 
@@ -664,7 +657,9 @@ swap_in (void *kpage, size_t slot)
   bitmap_set_multiple (used_map, slot, 1, false);
 }
 
-## Lazy loading
+## Integration of data structures and operations
+
+### Lazy loading
 
 Currently, executable code and data segments are directly loaded in memory during process setup. However, we have to modify some portion of the current implementation so that only a stack setup part is directly loaded when a process starts. That is, when a process is loading a program, every necessary page (except stack) is not loaded during the time. 따라서, 나중에 procee가 unloaded segments에 접근하면 not-present page fault가 발생하는데, 이때 page fault handler가 해당 user virtual pages을 load하고 process의 execution을 resume하도록 해야한다.
 
@@ -737,14 +732,11 @@ page_load looks up the SPTE that is associated with virtual page that faulted in
 bool
 page_load (void *upage)
 {
-  bool success = false;
   struct page *p = page_lookup (upage);
-  struct frame *f;
-
   if (!p)
     return false;
 
-  f = p->frame = frame_alloc (PAL_USER, p);
+  struct frame *f = p->frame = frame_alloc (PAL_USER, p);
   if (p->file != NULL)
     {
       size_t read_bytes
@@ -768,7 +760,6 @@ page_load (void *upage)
     }
 
   frame_unlock (f);
-
   return true;
 }
 
@@ -782,13 +773,31 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
+Notice that the initial stack segment (actually a single page when process starts) is ``not'' lazily loaded. That is, it is loaded immediately during process start up. However, if stack growth is needed, all the necessary stack virtual pages are lazily loaded.
+
+static bool
+setup_stack (void **esp) 
+{
+  bool success = false;
+  void *upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
+  struct page *p = page_make_entry (upage); 
+  if (!p)
+    return false;
+  else
+    {
+      p->type = PG_ZERO;
+      p->writable = true;
+
+      success = page_load (upage);
+      if (success)
+        *esp = PHYS_BASE;
+    }
+  return success;
+}
 
 
 
-
-## Stack growth
-
-// stack은 lazy load x
+### Stack growth
 
 The current implementation imposes a fixed size on the stack (single page). That is, a stack cannot grow down below the limited size. The requirement is to make it available to increase a size of the stack. We will impose a maximum limit on stack growth (STACK_MAX, 8MB). Lazy loading과 비슷하게, ESP register가 fixed-size stack 밑을 access할 경우 page fault가 발생한다. 이때, the handler first check whether a it needs a stack growth or not. If stack growth is needed, the handler retrieves a required stack page address. After this, it makes a SPTE associated with this stack page, and then 바로 page_load를 호출한다.
 
@@ -846,11 +855,119 @@ syscall_handler (struct intr_frame *f)
 
 
 
-## Evicting a frame
+### Evicting a frame
+
+To evict a FTE and its associated physical frame, two functions communicate each other; frame_alloc and page_load. In function frame_alloc, eviction이 필요한 조건은 palloc_get_page(PAL_USER)가 fail할 경우이다.
+
+struct frame *
+frame_alloc (struct page *p)
+{
+  struct thread *cur = thread_current ();
+  struct frame *f;
+  bool dirty;
+
+  lock_acquire (&table_lock);
+
+  if ((f = malloc (sizeof (struct frame))) == NULL)
+    PANIC ("cannot allocate frame table entry.");
+
+  f->kpage = palloc_get_page (PAL_USER);
+  if (f->kpage != NULL)
+    ...
+  else
+    {
+      /* Gets a FTE associated with victim physical frame. */
+      free (f);
+      f = frame_get_victim ();
+      
+      /* Performs eviction.
+         Gives an existing frame f to the new SPTE p. */
+      frame_do_eviction (f, p);
+      
+      lock_release (&table_lock);
+      return f;
+    }
+}
+
+A process가 frame_alloc(p)를 호출했을 때, eviction이 필요하다면, frame_get_victim 함수를 이용하여 적절한 victim FTE f를 선정하고 frame_do_eviction(f, p)를 호출한다. 여기서, f->suppl은 이전에 이 FTE을 request하여 reply받았던 SPTE이고, f->suppl->owner는 이 SPTE의 owner process이다. Eviction을 수행하기 위해, 먼저 f에 associated된 physical frame이 dirty한지 확인한다. dirty 여부는 이 frame이 mapped된 user virtual page와 pagedir_is_dirty 함수를 이용하여 확인한다. 만약 dirty할 경우, swap slot에 backup할 필요가 있다 using swap_out. 다음으로, f->suppl->owner의 pagedir에서 user virtual mapping between f->suppl->upage and a physical frame identified by f->kpage를 지운다 using pagedir_clear_page. 따라서, f->suppl->owner process가 나중에 f->suppl->upage를 access할 경우, not-present page fault가 발생하여 lazy load step을 다시 밟게 된다 (해당하는 SPTE, 즉 f->suppl은 삭제되지 않았기 때문에.)
+
+swap_out 함수는 page contents를 a free swap slot에 backup하고 해당 slot의 index를 리턴한다. 나중에, f->suppl->upage에 대한 access는 page fault를 발생시키고, 이는 page_load를 이용한 re-load procedure로 이어지는데, 이때는 file로부터 읽어들이거나 zeros로 fill하지 않고 contents가 backup되어 있는 swap slot으로부터 page를 load해야한다. 따라서, f->suppl->slot에 contents가 backup된 swap slot의 index를 save하고 f->suppl->type을 PG_SWAP으로 변경한다. 또한, SPTE f->suppl이 처음에 from-file-load로 setup되어있을 수 있기 때문에 f->suppl->file을 NULL로 바꿔주고, 이 SPTE는 더 이상 할당된 frame이 없기 때문에 f->suppl->frame도 NULL로 바꿔준다.
+
+마지막으로, victim FTE f에 대해 f->suppl과 f->owner를 각각 새로운 SPTE인 p와 p->owner로 바꿔준 후, frame table에 ``push back''하고 해당 FTE를 리턴한다
+
+static void
+frame_do_eviction (struct frame *v, struct page *p)
+{
+  ASSERT (lock_held_by_current_thread (&table_lock));
+
+  /* Removes a victim FTE from FT. */
+  list_remove (&v->list_elem);
+
+  /* Checks whether the victim RAM page is dirty and then
+     removes virtual mapping. */
+  dirty = pagedir_is_dirty (v->suppl->owner->pagedir, v->suppl->upage);
+  pagedir_clear_page (v->suppl->owner->pagedir, v->suppl->upage);
+
+  /* The victim frame has been modified. */
+  if (dirty)
+    {
+      /* Saves the previous contents to the swap slot and
+         Re-initializes supplemental information for later
+         page fault handling. */
+      v->suppl->slot = swap_out (f->kpage);
+      v->suppl->type = PG_SWAP;
+      v->suppl->file = NULL;
+      v->suppl->frame = NULL;
+    }
+
+  /* Changes owner. */
+  v->owner = p->owner;
+  v->suppl = p;
+
+  list_push_back (&frame_list, &v->list_elem);
+}
 
 
 
-## File memory mapping
+
+설명
+
+
+
+
+bool
+page_load (void *upage)
+{
+  struct page *p = page_lookup (upage);
+  if (!p)
+    return false;
+
+  struct frame *f = p->frame = frame_alloc (PAL_USER, p);
+  if (p->file != NULL)
+    ...
+  else if (p->slot != BITMAP_ERROR)
+    {
+      swap_in (f->kpage, p->slot);
+      p->slot = BITMAP_ERROR;
+    }
+  else
+    ...
+
+  if (!install_page (upage, f->kpage, p->writable)) 
+    {
+      frame_free (f);
+      return false; 
+    }
+
+  frame_unlock (f);
+  return true;
+}
+
+
+
+
+
+### File memory mapping
 
 Two system calls should be implemented; mmap and munmap. Therfore SYSCALL_CNT is increased from 13 to 15, and two system call wrappers and two core system call functionalities will be added.
 
@@ -1009,7 +1126,7 @@ do_munmap (struct mmap* m, bool write_back)
             = file_write_at (p->file, p->upage, p->read_bytes, p->file_ofs);
           lock_release (&fs_lock);
         }
-      page_remove_entry (upage);
+      page_remove_entry (p);
     }
   free (m);
 }
@@ -1039,6 +1156,26 @@ process_exit (void)
   sys_munmap_all ();
 
   ...
+} 
+
+
+
+
+
+## Notable dangerous points when removing FTE or SPTE
+
+Function frame_free removes a given FTE and page_remove_entry removes a given SPTE with internally using frame_free only if a FTE is allocated for this SPTE. The frame_free is called only by two functions; one is page_remove_entry and the other is page_load. In page_load, frame_free is called only if loading the contents falis, and there is no problem.
+
+When a process exits, all SPTEs owned by this process should be removed and freed. In addition, if some of the FTEs are allocated for these SPTEs, they should also be removed and freed. Here, we must consider eviction case. If a SPTE indicates that its contents are in a swap slot and file pointer is not NULL, then a user virtual page associated with this SPTE was first loaded from a file and then swapped out to a slot because it was dirty. In this case, if we 아무런 조치없이 SPTE를 free해버릴 경우, swap slots에서 leakage problem이 발생할 수 있으며, 해당 file에 변경 사항이 반영되지 않을 수 있다. Also, if a SPTE indicates that its contents are saved in a swap slot with null file pointer, 이때도 swap slots leakage problem을 고려해야한다.
+
+Therefore, for any SPTE p, if p->slot != BITMAP_ERROR and p->file != NULL, then p->upage must be loaded from the swap slot (swap_in) and written back to the file (file_write_at) when p is removed. Meanwhile, if p->slot != BITMAP_ERROR and p->file == NULL, then the corresponding swap slot must freed. In this case, there is no need to call swap_in, that is, we just need to reset one bit in the used_map. For this purpose, we will define a function swap_free(slot).
+
+void
+swap_free (size_t slot)
+{
+  ASSERT (slot != BITMAP_ERROR);
+  ASSERT (bitmap_all (used_map, slot, 1));
+  bitmap_set_multiple (used_map, slot, 1, false);
 }
 
 

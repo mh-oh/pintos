@@ -714,11 +714,10 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
-  struct page *p;
   bool success = false;
   void *upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
-  
-  if (!(p = page_make_entry (upage)))
+  struct page *p = page_make_entry (upage);  
+  if (!p)
     return false;
   else
     {
@@ -729,8 +728,6 @@ setup_stack (void **esp)
       success = page_load (upage);
       if (success)
         *esp = PHYS_BASE;
-      else
-        PANIC ("?????????");
     }
   return success;
   /*

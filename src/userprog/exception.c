@@ -154,7 +154,6 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  struct page *p;
   if (not_present)
     {
       //printf ("##### [%d] (page_fault) try loading upage=%p.\n", thread_tid (), fault_page);

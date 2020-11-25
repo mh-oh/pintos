@@ -47,7 +47,7 @@ struct hash *page_create_spt (void);
 void page_destroy_spt (struct hash *);
 
 struct page *page_make_entry (void *);
-void page_remove_entry (void *);
+void page_remove_entry (struct page *);
 
 bool page_load (void *);
 
