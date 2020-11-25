@@ -7,6 +7,9 @@
 #include "threads/thread.h"
 #include "filesys/file.h"
 
+/* Defined in vm/frame.h. */
+struct frame;
+
 /* Defined in filesys/file.c. */
 struct file;
 
@@ -23,6 +26,7 @@ enum page_type
 struct page
   {
     void *upage;   /* User virtual page. */
+    struct frame *frame;
 
     struct thread *owner;
 

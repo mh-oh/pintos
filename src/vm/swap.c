@@ -9,7 +9,7 @@
 #define PAGE_SECTOR_CNT (PGSIZE / BLOCK_SECTOR_SIZE)
 
 /* Mutual exclusion. */
-struct lock swap_lock;
+static struct lock swap_lock;
 
 /* Block device for swapping. */
 static struct block *swap_bdev;
@@ -60,13 +60,12 @@ swap_out (void* kpage)
       return slot;
     }
   else
-    PANIC ("possbiel?");
+    PANIC ("cannot find any free swap slot.");
 }
 
 void
 swap_in (void *kpage, size_t slot)
 {
-  size_t size = PGSIZE;
   block_sector_t sector;
   int i;
 
