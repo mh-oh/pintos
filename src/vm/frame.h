@@ -23,7 +23,6 @@ struct frame *frame_alloc (enum palloc_flags, struct page *);
 void frame_free (struct frame *);
 void frame_free_all (void);
 struct frame *frame_lookup (void *);
-struct frame *frame_get_victim (void);
 
 void frame_table_lock (void);
 void frame_table_unlock (void);
