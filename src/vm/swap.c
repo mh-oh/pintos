@@ -70,6 +70,7 @@ swap_in (void *kpage, size_t slot)
   int i;
 
   ASSERT (kpage != NULL);
+  ASSERT (slot != BITMAP_ERROR);
 
   sector = slot * PAGE_SECTOR_CNT;
   for (i = 0; i < PAGE_SECTOR_CNT; i++)

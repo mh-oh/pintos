@@ -31,6 +31,7 @@ struct page
     struct thread *owner;
 
     enum page_type type;
+    enum page_type prev;
     bool writable;
 
     struct file *file;
@@ -39,6 +40,8 @@ struct page
     size_t zero_bytes;
 
     size_t slot;
+
+    bool dirty;
 
     struct hash_elem hash_elem;
   };

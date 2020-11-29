@@ -668,12 +668,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           p->type = PG_FILE;
           p->file = file;
           p->file_ofs = ofs;
-          //printf ("##### [%d] (load_segment) setup spt entry %p: from file=%p, ofs=%d\n", thread_tid (), p, p->file, p->file_ofs);
+          //printf ("##### [%d] (load_segment) setup spt entry %p: upage=%p, from file=%p, ofs=%d\n", thread_tid (), p, p->upage, p->file, p->file_ofs);
         }
       else
         {
           p->type = PG_ZERO;
-          //printf ("##### [%d] (load_segment) setup spt entry %p: zero\n", thread_tid (), p);
+          //printf ("##### [%d] (load_segment) setup spt entry %p: upage=%p, zero\n", thread_tid (), p, p->upage);
         }
       
       p->writable = writable;
@@ -723,7 +723,7 @@ setup_stack (void **esp)
     {
       p->type = PG_ZERO;
       p->writable = true;
-      //printf ("##### [%d] (setup_stack) setup spt entry %p: zero\n", thread_tid (), p);
+      //printf ("##### [%d] (setup_stack) setup spt entry %p: upage=%p, zero\n", thread_tid (), p, p->upage);
 
       success = page_load (upage);
       if (success)

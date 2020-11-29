@@ -19,7 +19,7 @@ frame_init (void)
   lock_init (&table_lock);
   list_init (&frame_list);
 
-  //printf ("##### [%d] (frame_init) init complete.\n", thread_tid ());
+  ////printf ("##### [%d] (frame_init) init complete.\n", thread_tid ());
 }
 
 static struct frame *frame_get_victim (void);
@@ -35,7 +35,7 @@ frame_alloc (enum palloc_flags flags, struct page *p)
   ASSERT (p->owner == thread_current ());
 
   lock_acquire (&table_lock);
-  //printf ("##### [%d] (frame_alloc) table_lock is locked by thread %d\n", thread_tid (), thread_tid ());
+  ////printf ("##### [%d] (frame_alloc) table_lock is locked by thread %d\n", thread_tid (), thread_tid ());
 
   if ((f = malloc (sizeof (struct frame))) == NULL)
     PANIC ("cannot allocate frame table entry.");
@@ -45,14 +45,14 @@ frame_alloc (enum palloc_flags flags, struct page *p)
   if (f->kpage != NULL)
     {
       //printf ("##### [%d] (frame_alloc) kpage=%p is palloced to thread %d\n", thread_tid (), f->kpage, p->owner->tid);
-      //printf ("##### [%d] (frame_alloc) malloced ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
+      ////printf ("##### [%d] (frame_alloc) malloced ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
       lock_acquire (&f->lock);
       f->owner = p->owner;
       f->suppl = p;
-      //printf ("##### [%d] (frame_alloc) locked ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
+      ////printf ("##### [%d] (frame_alloc) locked ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
 
       list_push_back (&frame_list, &f->list_elem);
-      //printf ("##### [%d] (frame_alloc) table_lock is unlocked by thread %d\n", thread_tid (), thread_tid ());
+      ////printf ("##### [%d] (frame_alloc) table_lock is unlocked by thread %d\n", thread_tid (), thread_tid ());
       lock_release (&table_lock);
 
       return f;
@@ -63,13 +63,13 @@ frame_alloc (enum palloc_flags flags, struct page *p)
       free (f);
       f = frame_get_victim ();
       ASSERT (f->suppl != NULL);
-      //printf ("##### [%d] (frame_do_eviction) victim %p: f->owner=%d, f->suppl=%p, f->suppl->owner=%d\n", thread_tid (), f, f->owner->tid, f->suppl, f->suppl->owner->tid);
+      ////printf ("##### [%d] (frame_do_eviction) victim %p: f->owner=%d, f->suppl=%p, f->suppl->owner=%d, f->suppl->type=%d\n", thread_tid (), f, f->owner->tid, f->suppl, f->suppl->owner->tid, f->suppl->type);
       ASSERT (f->owner == f->suppl->owner);
       
       /* Performs eviction.
          Gives an existing frame f to the new SPTE p. */
       frame_do_eviction (f, p);
-      //printf ("##### [%d] (frame_alloc) table_lock is unlocked by thread %d\n", thread_tid (), thread_tid ());
+      ////printf ("##### [%d] (frame_alloc) table_lock is unlocked by thread %d\n", thread_tid (), thread_tid ());
       lock_release (&table_lock);
       return f;
     }
@@ -107,33 +107,57 @@ frame_do_eviction (struct frame *v, struct page *p)
   ASSERT (p->owner == thread_current ());
   ASSERT (lock_held_by_current_thread (&table_lock));
 
-  struct page *p_from = v->suppl;
   bool dirty;
 
-  //printf ("##### [%d] (frame_do_eviction) evicting a frame...\n", thread_tid ());
+  ////printf ("##### [%d] (frame_do_eviction) evicting a frame...\n", thread_tid ());
   /* Removes a victim FTE from FT. */
   list_remove (&v->list_elem);
 
   /* Checks whether the victim RAM page is dirty and then
      removes virtual mapping. */
-  pagedir_clear_page (p_from->owner->pagedir, p_from->upage);
-  dirty = pagedir_is_dirty (p_from->owner->pagedir, p_from->upage);
+  pagedir_clear_page (v->suppl->owner->pagedir, v->suppl->upage);
+  dirty = pagedir_is_dirty (v->suppl->owner->pagedir, v->suppl->upage);
+  v->suppl->dirty |= dirty;
+
+  //printf ("##### [%d] (frame_do_eviction) upage=%p, kpage=%p, type=%d, dirty=%d -> upage=%p, type=%d\n", thread_tid (), v->suppl->upage, v->suppl->frame->kpage, v->suppl->type, v->suppl->dirty, p->upage, p->type);
 
   /* The victim frame has been modified. */
-  //if (dirty)
-  //  {
+  if (v->suppl->dirty)
+    {
       /* Saves the previous contents to the swap slot and
          Re-initializes supplemental information for later
          page fault handling. */
       v->suppl->slot = swap_out (v->kpage);
       v->suppl->type = PG_SWAP;
-      v->suppl->file = NULL;
-      //printf ("##### [%d] (frame_do_eviction) swapped out: kpage=%p of thread %d into slot=%d\n", thread_tid (), v->kpage, v->owner->tid, v->suppl->slot);
-  //  }
+      //printf ("##### [%d] (frame_do_eviction) swapped out: slot=%d\n", thread_tid (), v->suppl->slot);
+    }
+  //else
+    //printf ("##### [%d] (frame_do_eviction) not dirty\n", thread_tid ());
+
+  /*
+  if (dirty)
+    {
+      if (v->suppl->file != NULL)
+        {
+          size_t bytes_written = file_write_at (v->suppl->file, v->suppl->frame->kpage, v->suppl->read_bytes, v->suppl->file_ofs);
+          //printf ("##### [%d] (frame_do_eviction) file out: file=%p, ofs=%d, written=%d\n", thread_tid (), v->suppl->file, v->suppl->file_ofs, bytes_written);
+        }
+      else
+        {
+          v->suppl->slot = swap_out (v->kpage);
+          v->suppl->prev = v->suppl->type;
+          v->suppl->type = PG_SWAP;
+          //v->suppl->file = NULL;
+          //printf ("##### [%d] (frame_do_eviction) swapped out: slot=%d\n", thread_tid (), v->suppl->slot);
+        }
+    }
+  else
+    //printf ("##### [%d] (frame_do_eviction) not dirty\n", thread_tid ());
+  */
 
   v->suppl->frame = NULL;
 
-  //printf ("##### [%d] (frame_do_eviction) changed owner of kpage=%p: thread %d to %d\n", thread_tid (), v->kpage, v->owner->tid, thread_tid ());
+  ////printf ("##### [%d] (frame_do_eviction) changed owner of kpage=%p: thread %d to %d\n", thread_tid (), v->kpage, v->owner->tid, thread_tid ());
 
   /* Changes owner. */
   v->owner = p->owner;
@@ -161,7 +185,7 @@ frame_free_all (void)
   struct thread *cur = thread_current ();
   struct list_elem *e;
   lock_acquire (&table_lock);
-  //printf ("##### [%d] (frame_free_all)\n", cur->tid);
+  ////printf ("##### [%d] (frame_free_all)\n", cur->tid);
   //for (e = list_begin (&frame_list); e != list_end (&frame_list);
   //     /**/)
   //  {
@@ -186,8 +210,8 @@ frame_unlock (struct frame *f)
   ASSERT (lock_held_by_current_thread (&f->lock));
 
   lock_acquire (&table_lock);
-  //printf ("##### [%d] (frame_unlock) f=%p, f->owner=%d, f->suppl=%p, f->suppl->owner=%d\n", thread_tid (), f, f->owner->tid, f->suppl, f->owner->tid);
-  //printf ("##### [%d] (frame_unlock) unlocked ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
+  ////printf ("##### [%d] (frame_unlock) f=%p, f->owner=%d, f->suppl=%p, f->suppl->owner=%d\n", thread_tid (), f, f->owner->tid, f->suppl, f->owner->tid);
+  ////printf ("##### [%d] (frame_unlock) unlocked ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
   lock_release (&f->lock);
   lock_release (&table_lock);
 }
