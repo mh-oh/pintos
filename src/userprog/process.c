@@ -356,8 +356,6 @@ process_exit (void)
   if (spt != NULL)
     page_destroy_spt (spt);
 
-  frame_free_all ();
-
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;

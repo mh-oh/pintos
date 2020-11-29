@@ -12,8 +12,8 @@ struct page;
 struct frame
   {
     void *kpage;   /* Kernel virtual page mapped to a frame. */
-    struct thread *owner;
-    struct page *suppl;
+    struct thread *__owner;
+    struct page *page;
     struct lock lock;
     struct list_elem list_elem;
   };

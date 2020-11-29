@@ -23,7 +23,7 @@ frame_init (void)
 }
 
 static struct frame *frame_get_victim (void);
-static void frame_do_eviction (struct frame *v, struct page *p);
+static void frame_do_eviction (struct page *src, struct page *dst);
 
 struct frame *
 frame_alloc (enum palloc_flags flags, struct page *p)
@@ -47,8 +47,8 @@ frame_alloc (enum palloc_flags flags, struct page *p)
       //printf ("##### [%d] (frame_alloc) kpage=%p is palloced to thread %d\n", thread_tid (), f->kpage, p->owner->tid);
       ////printf ("##### [%d] (frame_alloc) malloced ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
       lock_acquire (&f->lock);
-      f->owner = p->owner;
-      f->suppl = p;
+      f->__owner = p->owner;
+      f->page = p;
       ////printf ("##### [%d] (frame_alloc) locked ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
 
       list_push_back (&frame_list, &f->list_elem);
@@ -59,16 +59,17 @@ frame_alloc (enum palloc_flags flags, struct page *p)
     }
   else
     {
-      /* Gets a FTE associated with victim physical frame. */
+      /* Gets a FTE associated with a victim physical frame. */
       free (f);
       f = frame_get_victim ();
-      ASSERT (f->suppl != NULL);
+      ASSERT (f->page != NULL);
       ////printf ("##### [%d] (frame_do_eviction) victim %p: f->owner=%d, f->suppl=%p, f->suppl->owner=%d, f->suppl->type=%d\n", thread_tid (), f, f->owner->tid, f->suppl, f->suppl->owner->tid, f->suppl->type);
-      ASSERT (f->owner == f->suppl->owner);
+      ASSERT (f->__owner == f->page->owner);
       
       /* Performs eviction.
-         Gives an existing frame f to the new SPTE p. */
-      frame_do_eviction (f, p);
+         Gives an existing frame `f' to the new SPTE `p'. */
+      //frame_do_eviction (f, p);
+      frame_do_eviction (f->page, p);
       ////printf ("##### [%d] (frame_alloc) table_lock is unlocked by thread %d\n", thread_tid (), thread_tid ());
       lock_release (&table_lock);
       return f;
@@ -88,7 +89,7 @@ frame_get_victim (void)
     {
       struct frame *f
         = list_entry (e, struct frame, list_elem);
-      if (f->owner->tid == cur->tid)
+      if (f->__owner->tid == cur->tid)
         {
           if (lock_held_by_current_thread (&f->lock))
             continue;
@@ -101,70 +102,51 @@ frame_get_victim (void)
 }
 
 static void
-frame_do_eviction (struct frame *v, struct page *p)
+frame_do_eviction (struct page *src, struct page *dst)
 {
-  ASSERT (v != NULL && p != NULL);
-  ASSERT (p->owner == thread_current ());
+  /**/
+  ASSERT (src != NULL);
+  ASSERT (src->frame != NULL);
+  ASSERT (src->frame->page == src);
+
+  /**/
+  ASSERT (dst != NULL);
+  ASSERT (dst->frame == NULL);
+  ASSERT (dst->owner == thread_current ());
+
   ASSERT (lock_held_by_current_thread (&table_lock));
 
-  bool dirty;
+  struct frame *f = src->frame;
 
-  ////printf ("##### [%d] (frame_do_eviction) evicting a frame...\n", thread_tid ());
-  /* Removes a victim FTE from FT. */
-  list_remove (&v->list_elem);
+  /* Removes a victim frame from the table.
+     It will be pushed back to the table at the end of
+     this procedure. */
+  list_remove (&f->list_elem);
 
-  /* Checks whether the victim RAM page is dirty and then
-     removes virtual mapping. */
-  pagedir_clear_page (v->suppl->owner->pagedir, v->suppl->upage);
-  dirty = pagedir_is_dirty (v->suppl->owner->pagedir, v->suppl->upage);
-  v->suppl->dirty |= dirty;
+  /* Checks whether the victim page is dirty, and then
+     removes the virtual mapping. */
+  pagedir_clear_page (src->owner->pagedir, src->upage);
+  src->dirty |= pagedir_is_dirty (src->owner->pagedir, src->upage);
 
-  //printf ("##### [%d] (frame_do_eviction) upage=%p, kpage=%p, type=%d, dirty=%d -> upage=%p, type=%d\n", thread_tid (), v->suppl->upage, v->suppl->frame->kpage, v->suppl->type, v->suppl->dirty, p->upage, p->type);
-
-  /* The victim frame has been modified. */
-  if (v->suppl->dirty)
+  if (src->dirty)
     {
       /* Saves the previous contents to the swap slot and
-         Re-initializes supplemental information for later
+         re-initializes supplemental information for later
          page fault handling. */
-      v->suppl->slot = swap_out (v->kpage);
-      v->suppl->type = PG_SWAP;
-      //printf ("##### [%d] (frame_do_eviction) swapped out: slot=%d\n", thread_tid (), v->suppl->slot);
+      src->slot = swap_out (f->kpage);
+      src->type = PG_SWAP;
     }
-  //else
-    //printf ("##### [%d] (frame_do_eviction) not dirty\n", thread_tid ());
-
-  /*
-  if (dirty)
-    {
-      if (v->suppl->file != NULL)
-        {
-          size_t bytes_written = file_write_at (v->suppl->file, v->suppl->frame->kpage, v->suppl->read_bytes, v->suppl->file_ofs);
-          //printf ("##### [%d] (frame_do_eviction) file out: file=%p, ofs=%d, written=%d\n", thread_tid (), v->suppl->file, v->suppl->file_ofs, bytes_written);
-        }
-      else
-        {
-          v->suppl->slot = swap_out (v->kpage);
-          v->suppl->prev = v->suppl->type;
-          v->suppl->type = PG_SWAP;
-          //v->suppl->file = NULL;
-          //printf ("##### [%d] (frame_do_eviction) swapped out: slot=%d\n", thread_tid (), v->suppl->slot);
-        }
-    }
-  else
-    //printf ("##### [%d] (frame_do_eviction) not dirty\n", thread_tid ());
-  */
-
-  v->suppl->frame = NULL;
-
-  ////printf ("##### [%d] (frame_do_eviction) changed owner of kpage=%p: thread %d to %d\n", thread_tid (), v->kpage, v->owner->tid, thread_tid ());
+  
+  /* Transfer. */
+  src->frame->page = dst;
+  src->frame = NULL;
 
   /* Changes owner. */
-  v->owner = p->owner;
-  v->suppl = p;
+  f->__owner = dst->owner;
 
-  list_push_back (&frame_list, &v->list_elem);
+  list_push_back (&frame_list, &f->list_elem);
 }
+
 
 
 
