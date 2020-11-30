@@ -6,7 +6,7 @@ CMD="pintos -v -k -T 60 --qemu  --filesys-size=2 -p tests/vm/page-parallel -a pa
 
 for ((i = 0; i < 100; i++))
 do
-    eval $CMD "| tee ../outputs/out"$i
+    eval $CMD "| tee ../outputs-no-print/out"$i
 done
 
 cd ../

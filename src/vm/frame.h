@@ -14,7 +14,8 @@ struct frame
     void *kpage;   /* Kernel virtual page mapped to a frame. */
     struct thread *__owner;
     struct page *page;
-    struct lock lock;
+    //struct lock lock;
+    bool pinned;
     struct list_elem list_elem;
   };
 
@@ -27,5 +28,8 @@ struct frame *frame_lookup (void *);
 void frame_table_lock (void);
 void frame_table_unlock (void);
 void frame_unlock (struct frame *);
+
+bool frame_try_pin (struct frame *);
+void frame_unpin (struct frame *);
 
 #endif /* vm/frame.h */
