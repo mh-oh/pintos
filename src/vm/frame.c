@@ -22,8 +22,6 @@ frame_init (void)
   list_init (&frame_list);
 
   lock_init (&mutex_lock);
-
-  printf ("##### [%d] (frame_init) init complete.\n", thread_tid ());
 }
 
 static struct frame *frame_get_victim (void);
@@ -39,7 +37,6 @@ frame_alloc (enum palloc_flags flags, struct page *p)
   ASSERT (p->owner == thread_current ());
 
   lock_acquire (&table_lock);
-  printf ("##### [%d] (frame_alloc) table_lock is locked by thread %d\n", thread_tid (), thread_tid ());
 
   if ((f = malloc (sizeof (struct frame))) == NULL)
     PANIC ("cannot allocate frame table entry.");
@@ -48,16 +45,14 @@ frame_alloc (enum palloc_flags flags, struct page *p)
   f->kpage = palloc_get_page (flags);
   if (f->kpage != NULL)
     {
-      printf ("##### [%d] (frame_alloc) kpage=%p is palloced to thread %d\n", thread_tid (), f->kpage, p->owner->tid);
-      printf ("##### [%d] (frame_alloc) malloced ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
+      printf ("##### [%d] (frame_alloc) f=%p is malloced. f->kpage=%p\n", thread_tid (), f, f->kpage);
       //lock_acquire (&f->lock);
-      f->pinned = true;
+      frame_try_pin (f);
+
       f->__owner = p->owner;
       f->page = p;
-      printf ("##### [%d] (frame_alloc) locked ft entry %p for kpage=%p\n", thread_tid (), f, f->kpage);
 
       list_push_back (&frame_list, &f->list_elem);
-      printf ("##### [%d] (frame_alloc) table_lock is unlocked by thread %d\n", thread_tid (), thread_tid ());
       lock_release (&table_lock);
 
       return f;
@@ -68,7 +63,6 @@ frame_alloc (enum palloc_flags flags, struct page *p)
       free (f);
       f = frame_get_victim ();
       ASSERT (f->page != NULL);
-      printf ("##### [%d] (frame_do_eviction) victim %p: f->__owner=%d, f->page=%p, f->page->owner=%d, f->page->type=%d\n", thread_tid (), f, f->__owner->tid, f->page, f->page->owner->tid, f->page->type);
       ASSERT (f->__owner == f->page->owner);
       
       /* Performs eviction.
@@ -118,6 +112,8 @@ frame_do_eviction (struct page *src, struct page *dst)
 
   struct frame *f = src->frame;
 
+  printf ("##### [%d] (frame_do_eviction) victim f=%p: f->owner=%d, f->page=%p, f->page->owner=%d, f->page->type=%d\n", thread_tid (), f, f->__owner->tid, f->page, f->page->owner->tid, f->page->type);
+
   /* Removes a victim frame from the table.
      It will be pushed back to the table at the end of
      this procedure. */
@@ -158,7 +154,8 @@ frame_free (struct frame *f)
   ASSERT (f != NULL);
   //ASSERT (lock_held_by_current_thread (&f->lock));
   list_remove (&f->list_elem);
-  free (f);
+  //free (f);
+  printf ("##### [%d] (frame_free) f=%p is freed.\n", thread_tid (), f);
 }
 
 void
@@ -167,7 +164,6 @@ frame_free_all (void)
   struct thread *cur = thread_current ();
   struct list_elem *e;
   lock_acquire (&table_lock);
-  printf ("##### [%d] (frame_free_all)\n", cur->tid);
   //for (e = list_begin (&frame_list); e != list_end (&frame_list);
   //     /**/)
   //  {
@@ -231,8 +227,13 @@ frame_try_pin (struct frame *f)
   bool success;
   lock_acquire (&mutex_lock);
   success = f != NULL && !f->pinned;
-  if (f)
-    f->pinned = true;
+  if (success)
+    {
+      printf ("##### [%d] (frame_try_pin) f=%p is pinned\n", thread_tid (), f);
+      f->pinned = true;
+    }
+  else
+    printf ("##### [%d] (frame_try_pin) f=%p was already pinned\n", thread_tid (), f);
   lock_release (&mutex_lock);
   return success;
 }
@@ -243,5 +244,6 @@ frame_unpin (struct frame *f)
   ASSERT (f != NULL);
   lock_acquire (&mutex_lock);
   f->pinned = false;
+  printf ("##### [%d] (frame_unpin) f=%p is unpinned.\n", thread_tid (), f);
   lock_release (&mutex_lock);
 }
