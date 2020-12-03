@@ -1,6 +1,0 @@
-f: malloc: total=1046
-f: free  : total=1046
-f: remain: total=0
-p: malloc: total=1054
-p: free  : total=1054
-p: remain: total=0

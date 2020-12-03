@@ -65,23 +65,17 @@ page_hash_free (struct hash_elem *e, void *aux UNUSED)
 {
   struct page *p = hash_entry (e, struct page, hash_elem);
   struct frame *f = p->frame;
-
   if (f != NULL)
     {
-      while (!frame_try_pin (f))
-        thread_yield ();
+      lock_acquire (&f->lock);
+      if (f == p->frame)
+        frame_free (f);
+      else
+        {
+          ASSERT (p->frame == NULL);
+          lock_release (&f->lock);
+        }
     }
-
-  printf ("##### [%d] (page_hash_free) p=%p, p->frame=%p, f=%p\n", thread_tid (), p, p->frame, f);
-
-  if (f != p->frame)
-    {
-      ASSERT (p->frame == NULL);
-      frame_unpin (f);
-    }
-
-  if (p->frame != NULL)
-    frame_free (p->frame);
 
   //free (p);
   
@@ -121,14 +115,15 @@ page_remove_entry (struct page *p)
   ASSERT (p->owner == thread_current ());
   ASSERT (p != NULL);
   struct frame *f = p->frame;
-  if (frame_try_pin (f))
+  if (f != NULL)
     {
+      lock_acquire (&f->lock);
       if (f == p->frame)
         frame_free (f);
       else
         {
           ASSERT (p->frame == NULL);
-          frame_unpin (f);
+          lock_release (&f->lock);
         }
     }
   hash_delete (p->owner->spt, &p->hash_elem);
@@ -190,7 +185,8 @@ page_load (void *upage)
   if (!install_page (upage, f->kpage, p->writable)) 
     goto fail;
 
-  frame_unpin (f);
+  //frame_unpin (f);
+  frame_unlock (f);
   return true;
 
  fail:

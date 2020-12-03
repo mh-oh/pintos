@@ -14,7 +14,7 @@ struct frame
     void *kpage;   /* Kernel virtual page mapped to a frame. */
     struct thread *__owner;
     struct page *page;
-    //struct lock lock;
+    struct lock lock;
     bool pinned;
     struct list_elem list_elem;
   };
@@ -22,7 +22,6 @@ struct frame
 void frame_init (void);
 struct frame *frame_alloc (enum palloc_flags, struct page *);
 void frame_free (struct frame *);
-void frame_free_all (void);
 struct frame *frame_lookup (void *);
 
 void frame_table_lock (void);
