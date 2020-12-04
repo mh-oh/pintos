@@ -75,4 +75,3 @@ TESTCMD += 2> $(TEST).errors $(if $(VERBOSE),|tee,>) $(TEST).output
 
 %.result: %.ck %.output
 	perl -I$(SRCDIR) $< $* $@
-	echo "$< ,,, $* ,,, $@"

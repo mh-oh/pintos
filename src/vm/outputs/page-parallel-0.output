@@ -1,6 +1,6 @@
 Copying tests/vm/page-parallel to scratch partition...
 Copying tests/vm/child-linear to scratch partition...
-qemu-system-i386 -device isa-debug-exit -hda /tmp/ELQ5lDfz2k.dsk -m 4 -net none -nographic -monitor null
+qemu-system-i386 -device isa-debug-exit -hda /tmp/ivaYAF2qQA.dsk -m 4 -net none -nographic -monitor null
 c[?7l[2J[0mSeaBIOS (version 1.13.0-1ubuntu1)
 Booting from Hard Disk...
 PPiiLLoo  hhddaa1
@@ -10,7 +10,7 @@ Kernel command line: -q -f extract run page-parallel
 Pintos booting with 3,968 kB RAM...
 367 pages available in kernel pool.
 367 pages available in user pool.
-Calibrating timer...  576,716,800 loops/s.
+Calibrating timer...  538,214,400 loops/s.
 hda: 13,104 sectors (6 MB), model "QM00001", serial "QEMU HARDDISK"
 hda1: 171 sectors (85 kB), Pintos OS kernel (20)
 hda2: 4,096 sectors (2 MB), Pintos file system (21)
@@ -31,23 +31,23 @@ Executing 'page-parallel':
 (page-parallel) exec "child-linear"
 child-linear: exit(66)
 (page-parallel) exec "child-linear"
+child-linear: exit(66)
 (page-parallel) exec "child-linear"
-child-linear: exit(66)
-child-linear: exit(66)
 (page-parallel) wait for child 0
 (page-parallel) wait for child 1
 (page-parallel) wait for child 2
+child-linear: exit(66)
 (page-parallel) wait for child 3
 child-linear: exit(66)
 (page-parallel) end
 page-parallel: exit(0)
 Execution of 'page-parallel' complete.
-Timer: 2425 ticks
-Thread: 61 idle ticks, 44 kernel ticks, 2320 user ticks
-hda2 (filesys): 228 reads, 414 writes
+Timer: 2494 ticks
+Thread: 40 idle ticks, 41 kernel ticks, 2413 user ticks
+hda2 (filesys): 205 reads, 414 writes
 hda3 (scratch): 203 reads, 2 writes
-hda4 (swap): 40 reads, 1376 writes
-Console: 694399 characters output
+hda4 (swap): 8 reads, 8 writes
+Console: 682248 characters output
 Keyboard: 0 keys pressed
-Exception: 1053 page faults
+Exception: 1046 page faults
 Powering off...

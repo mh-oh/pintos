@@ -1,6 +1,6 @@
 Copying tests/vm/page-parallel to scratch partition...
 Copying tests/vm/child-linear to scratch partition...
-qemu-system-i386 -device isa-debug-exit -hda /tmp/w_yj0N4oB0.dsk -m 4 -net none -nographic -monitor null
+qemu-system-i386 -device isa-debug-exit -hda /tmp/xP7SbWw53b.dsk -m 4 -net none -nographic -monitor null
 c[?7l[2J[0mSeaBIOS (version 1.13.0-1ubuntu1)
 Booting from Hard Disk...
 PPiiLLoo  hhddaa1
@@ -31,23 +31,23 @@ Executing 'page-parallel':
 (page-parallel) exec "child-linear"
 (page-parallel) exec "child-linear"
 child-linear: exit(66)
+child-linear: exit(66)
 (page-parallel) exec "child-linear"
+child-linear: exit(66)
 (page-parallel) wait for child 0
 (page-parallel) wait for child 1
-child-linear: exit(66)
-child-linear: exit(66)
-child-linear: exit(66)
 (page-parallel) wait for child 2
 (page-parallel) wait for child 3
+child-linear: exit(66)
 (page-parallel) end
 page-parallel: exit(0)
 Execution of 'page-parallel' complete.
-Timer: 3247 ticks
-Thread: 131 idle ticks, 37 kernel ticks, 3079 user ticks
-hda2 (filesys): 267 reads, 414 writes
+Timer: 4422 ticks
+Thread: 67 idle ticks, 36 kernel ticks, 4319 user ticks
+hda2 (filesys): 236 reads, 414 writes
 hda3 (scratch): 203 reads, 2 writes
-hda4 (swap): 1328 reads, 3160 writes
-Console: 789075 characters output
+hda4 (swap): 632 reads, 656 writes
+Console: 727664 characters output
 Keyboard: 0 keys pressed
-Exception: 1219 page faults
+Exception: 1128 page faults
 Powering off...

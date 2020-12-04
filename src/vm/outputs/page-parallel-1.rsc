@@ -1,7 +1,7 @@
 PASS
 struct frame
-    malloc: total=732
-    free  : total=732
+    malloc: total=933
+    free  : total=933
     remain: total=0
 
 PASS

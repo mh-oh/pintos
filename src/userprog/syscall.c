@@ -9,19 +9,23 @@
 #include "threads/synch.h"
 #include "threads/malloc.h"
 #include "userprog/process.h"
+#include "userprog/pagedir.h"
 #include "devices/shutdown.h"
 #include "devices/input.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "vm/page.h"
 
 static void syscall_handler (struct intr_frame *);
 
 /* Number of system calls. */
-#define SYSCALL_CNT 13
+#define SYSCALL_CNT 15
 
 /* Wrapper functions for each system call.
    Each of them safely reads sycall arguments and invokes system
    call service. */
+
+/* Projects 2 and later. */
 static void sys_halt_wrapper     (struct intr_frame *);
 static void sys_exit_wrapper     (struct intr_frame *);
 static void sys_exec_wrapper     (struct intr_frame *);
@@ -36,7 +40,12 @@ static void sys_seek_wrapper     (struct intr_frame *);
 static void sys_tell_wrapper     (struct intr_frame *);
 static void sys_close_wrapper    (struct intr_frame *);
 
+/* Project 3 and optionally project 4. */
+static void sys_mmap_wrapper     (struct intr_frame *);
+static void sys_munmap_wrapper   (struct intr_frame *);
+
 /* Prototypes. */
+
 void     sys_halt (void);
 void     sys_exit (int);
 pid_t    sys_exec (const char *);
@@ -50,6 +59,8 @@ int      sys_write (int, const void *, unsigned);
 void     sys_seek (int, unsigned);
 unsigned sys_tell (int);
 void     sys_close (int);
+mapid_t  sys_mmap (int, void *);
+void     sys_munmap (mapid_t);
 
 /* In Pintos, system call number and arguments are all 32-bit
    values.  See lib/user/syscall.c */
@@ -118,7 +129,7 @@ syscall_init (void)
 
   lock_init (&fs_lock);
 
-  /* Initialize system call wrappers. */
+  /* Projects 2 and later. */
   sys_wrap_funcs[SYS_HALT]     = sys_halt_wrapper;
   sys_wrap_funcs[SYS_EXIT]     = sys_exit_wrapper;
   sys_wrap_funcs[SYS_EXEC]     = sys_exec_wrapper;
@@ -132,14 +143,29 @@ syscall_init (void)
   sys_wrap_funcs[SYS_SEEK]     = sys_seek_wrapper;
   sys_wrap_funcs[SYS_TELL]     = sys_tell_wrapper;
   sys_wrap_funcs[SYS_CLOSE]    = sys_close_wrapper;
+
+  /* Project 3 and optionally project 4. */
+  sys_wrap_funcs[SYS_MMAP]     = sys_mmap_wrapper;
+  sys_wrap_funcs[SYS_MUNMAP]   = sys_munmap_wrapper;
 }
 
 static void
 syscall_handler (struct intr_frame *f) 
 {
+  struct thread *cur = thread_current ();
   void *esp = f->esp;
   int no;
   SYSCALL_GET_NUMBER (esp, &no);
+
+  /* Saves `esp' into `struct thread' on the initial
+     transition from user to kernel mode.
+     
+     It is needed when a page fault occurs in the kernel.
+     Since the processor only saves the stack pointer when an
+     exception causes a switch from user to kernel mode,
+     reading `esp' out of the `struct intr_frame' passed to
+     page_fault() would yield an undefined value. */
+  cur->saved_esp = esp;
 
   /* Invokes system call wrapper function. */
   if (no < 0 || no >= SYSCALL_CNT)
@@ -627,6 +653,169 @@ sys_close (int fd_no)
   free (fd);
 }
 
+/* A mmap mapping. */
+struct mmap
+  {
+    struct list_elem mmap_list_elem;   /* List element. */
+    struct file *file;                 /* File. */
+    mapid_t mapid;                     /* Mmap id. */
+    
+    /* A user virtual address from which mapping starts. */
+    void *addr;
+    /* Number of pages mmapped. */
+    size_t pages;
+  };
+
+/* Finds a file descriptor with the given FD_NO.
+   If not found, returns NULL. */
+static struct mmap *
+find_mmap (mapid_t mapid)
+{
+  struct thread *cur = thread_current ();
+  struct list *mmap_list = &cur->mmap_list;
+  struct list_elem *e;
+  for (e = list_begin (mmap_list); e != list_end (mmap_list);
+       e = list_next (e))
+    {
+      struct mmap *m
+        = list_entry (e, struct mmap, mmap_list_elem);
+      if (m->mapid == mapid)
+        return m;
+    }
+  return NULL;
+}
+
+static void do_munmap (struct mmap *, bool);
+
+mapid_t
+sys_mmap (int fd_no, void *addr)
+{
+  struct thread *cur = thread_current ();
+  struct file_desc *fd;
+  struct file *f;
+  struct mmap *m;
+  size_t size;
+  off_t ofs = 0;
+
+  if (fd_no == STDIN_FILENO || fd_no == STDOUT_FILENO)
+    return -1;
+  if (addr == NULL || pg_ofs (addr) != 0)
+    return -1;
+  if ((fd = find_file_desc (fd_no)) == NULL)
+    return -1;
+  if ((m = malloc (sizeof (struct mmap))) == NULL)
+    return -1;
+  
+  lock_acquire (&fs_lock);
+  if ((f = file_reopen (fd->file)) == NULL)
+    {
+      lock_release (&fs_lock);
+      free (m);
+      return -1;
+    }
+  lock_release (&fs_lock);
+
+  m->file = f;
+  m->mapid = cur->next_mapid++;
+  m->addr = addr;
+  m->pages = 0;
+  list_push_back (&cur->mmap_list, &m->mmap_list_elem);
+
+  lock_acquire (&fs_lock);
+  size = file_length (m->file);
+  lock_release (&fs_lock);
+
+  if (size == 0)
+    return -1;
+
+  while (size > 0)
+    {
+      size_t page_read_bytes = (size > PGSIZE) ? PGSIZE : size;
+      size_t page_zero_bytes = PGSIZE - page_read_bytes;
+      struct page *p;
+
+      if ((p = page_make_entry (addr)) == NULL)
+        goto munmap;
+      m->pages++;
+
+      p->type = PG_FILE;
+      p->writable = true;
+
+      p->file = f;
+      p->read_bytes = page_read_bytes;
+      p->zero_bytes = page_zero_bytes;
+      p->file_ofs = ofs;
+
+      size -= page_read_bytes;
+      addr += PGSIZE;
+      ofs  += page_read_bytes;
+    }  
+
+  return m->mapid;
+
+ munmap:
+  do_munmap (m, false);
+  return -1;
+}
+
+void
+sys_munmap (mapid_t mapid)
+{
+  struct mmap *m;
+  if ((m = find_mmap (mapid)) == NULL)
+    return;
+  do_munmap (m, true);
+}
+
+static void
+do_munmap (struct mmap* m, bool write)
+{
+  struct thread *cur = thread_current ();
+  struct page *p;
+  size_t write_bytes;
+  void *upage;
+
+  list_remove (&m->mmap_list_elem);
+
+  for (upage = m->addr; upage < m->addr + PGSIZE * m->pages;
+       upage += PGSIZE)
+    {
+      p = page_lookup (upage);
+      if (write &&
+          pagedir_is_dirty (cur->pagedir, upage))
+        {
+          lock_acquire (&fs_lock);
+          write_bytes
+            = file_write_at (p->file, p->upage, p->read_bytes, p->file_ofs);
+          if (write_bytes != (int) p->read_bytes)
+            PANIC ("panic?");
+          lock_release (&fs_lock);
+        }
+      page_remove_entry (p);
+    }
+  
+  lock_acquire (&fs_lock);
+  file_close (m->file);
+  lock_release (&fs_lock);
+  
+  list_remove (&m->mmap_list_elem);
+  free (m);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* Closes all opened files of the current process. */
 void
 sys_close_all (void)
@@ -749,6 +938,22 @@ sys_close_wrapper (struct intr_frame *f)
   sys_param_type ARG0;
   SYSCALL_GET_ARGS1 (f->esp, &ARG0);
   sys_close ((int) ARG0);
+}
+
+static void
+sys_mmap_wrapper (struct intr_frame *f)
+{
+  sys_param_type ARG0, ARG1;
+  SYSCALL_GET_ARGS2 (f->esp, &ARG0, &ARG1);
+  f->eax = sys_mmap ((int) ARG0, (void *) ARG1);
+}
+
+static void
+sys_munmap_wrapper (struct intr_frame *f)
+{
+  sys_param_type ARG0;
+  SYSCALL_GET_ARGS1 (f->esp, &ARG0);
+  sys_munmap ((mapid_t) ARG0);
 }
 
 /* Handles invalid user-provided pointer access. */

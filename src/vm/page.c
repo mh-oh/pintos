@@ -21,12 +21,12 @@ page_create_spt (void)
   if (!spt)
     PANIC ("cannot create supplemental page table.");
   hash_init (spt, page_hash_func, page_hash_less, NULL);
-  printf ("##### [%d] (page_create_spt) spt=%p is malloced.\n", thread_tid (), spt);
+  //printf ("##### [%d] (page_create_spt) spt=%p is malloced.\n", thread_tid (), spt);
   return spt;
 }
 
 void
-page_hash_action (struct hash_elem *e, void *aux)
+page_hash_action (struct hash_elem *e, void *aux UNUSED)
 {
   struct page *p = hash_entry (e, struct page, hash_elem);
   printf ("p=%p, p->upage=%p\n", p, p->upage);
@@ -36,11 +36,11 @@ void
 page_destroy_spt (struct hash *spt)
 {
   ASSERT (spt != NULL);
-  printf ("##### [%d] (page_destroy_spt) spt size is %d\n", thread_tid (), hash_size (spt));
+  //printf ("##### [%d] (page_destroy_spt) spt size is %d\n", thread_tid (), hash_size (spt));
   //hash_apply (spt, page_hash_action);
   hash_destroy (spt, page_hash_free);
   //free (spt);
-  printf ("##### [%d] (page_destroy_spt) spt=%p is freed.\n", thread_tid (), spt);
+  //printf ("##### [%d] (page_destroy_spt) spt=%p is freed.\n", thread_tid (), spt);
 }
 
 static unsigned
@@ -79,7 +79,7 @@ page_hash_free (struct hash_elem *e, void *aux UNUSED)
 
   //free (p);
   
-  printf ("##### [%d] (page_hash_free) p=%p is freed.\n", thread_tid (), p);
+  //printf ("##### [%d] (page_hash_free) p=%p is freed.\n", thread_tid (), p);
 }
 
 struct page *
@@ -105,13 +105,14 @@ page_make_entry (void *upage)
   p->dirty = false;
 
   hash_insert (cur->spt, &p->hash_elem);
-  printf ("##### [%d] (page_make_entry) p=%p is malloced to load upage=%p. spt size is %d\n", thread_tid (), p, p->upage, hash_size (cur->spt));
+  //printf ("##### [%d] (page_make_entry) p=%p is malloced to load upage=%p. spt size is %d\n", thread_tid (), p, p->upage, hash_size (cur->spt));
   return p;
 }
 
 void
 page_remove_entry (struct page *p)
 {
+  //printf ("p->owner=%d, cur=%d\n", p->owner->tid, thread_tid ());
   ASSERT (p->owner == thread_current ());
   ASSERT (p != NULL);
   struct frame *f = p->frame;
@@ -145,7 +146,7 @@ page_load (void *upage)
 
   //ASSERT (p->frame == NULL);
 
-  printf ("##### [%d] (page_load) loading... p=%p, p->type=%d, p->upage=%p\n", thread_tid (), p, p->type, p->upage);
+  //printf ("##### [%d] (page_load) loading... p=%p, p->type=%d, p->upage=%p\n", thread_tid (), p, p->type, p->upage);
   struct frame *f = p->frame = frame_alloc (PAL_USER, p);
   switch (p->type)
     {
@@ -180,7 +181,7 @@ page_load (void *upage)
       NOT_REACHED ();
     }
 
-  printf ("##### [%d] (page_load) complete... p=%p, p->frame->page=%p, p->type=%d, p->frame=%p, f->frame->kpage=%p\n", thread_tid (), p, p->frame->page, p->type, p->frame, p->frame->kpage);
+  //printf ("##### [%d] (page_load) complete... p=%p, p->frame->page=%p, p->type=%d, p->frame=%p, f->frame->kpage=%p\n", thread_tid (), p, p->frame->page, p->type, p->frame, p->frame->kpage);
 
   if (!install_page (upage, f->kpage, p->writable)) 
     goto fail;

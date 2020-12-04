@@ -130,6 +130,11 @@ struct thread
 #endif
 
     struct hash *spt;
+    void *saved_esp;
+
+    /* Shared between thread.c and syscall.c. */
+    struct list mmap_list;              /* List of mmap mappings. */
+    int next_mapid;                     /* Next file descriptor number. */
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

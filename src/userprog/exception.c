@@ -14,6 +14,7 @@ static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+static bool stack_access (void *, void *);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -154,12 +155,26 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  struct thread *cur = thread_current ();
+  struct page *p;
+  void *esp;
+
+  esp = user ? f->esp : cur->saved_esp;
+  if (stack_access (fault_addr, esp))
+    {
+      if ((p = page_make_entry (fault_page)))
+        {
+          p->type = PG_ZERO;
+          p->writable = true;
+        }
+    }
+
   if (not_present)
     {
-      ////printf ("##### [%d] (page_fault) try loading upage=%p.\n", thread_tid (), fault_page);
+      //////printf ("##### [%d] (page_fault) try loading upage=%p.\n", thread_tid (), fault_page);
       if (!page_load (fault_page))
         {
-          ////printf ("##### [%d] (page_fault) load failed.\n", thread_tid ());
+          //////printf ("##### [%d] (page_fault) load failed.\n", thread_tid ());
           sys_exit (-1);
         }
       return;
@@ -171,7 +186,7 @@ page_fault (struct intr_frame *f)
      by `get_user' and `copy_from_user' defined in "userprog/syscall.c". */
   if (!user)
     {
-      ////printf ("##### [%d] (page_fault) kernel context. returns -1.\n", thread_tid ());
+      //////printf ("##### [%d] (page_fault) kernel context. returns -1.\n", thread_tid ());
       /* When a page fault occurs in a function F, EAX holds the
          address where F is called. EIP points the next instruction
          to execute. */
@@ -192,3 +207,12 @@ page_fault (struct intr_frame *f)
   kill (f);
 }
 
+#define STACK_MAX (8 * 1024 * 1024) 
+
+static bool
+stack_access (void *vaddr, void *esp)
+{
+  return vaddr > (PHYS_BASE - STACK_MAX)
+         && vaddr <= (PHYS_BASE - 1)
+         && vaddr >= (esp - 32);
+}
