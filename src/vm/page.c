@@ -112,7 +112,6 @@ page_make_entry (void *upage)
 void
 page_remove_entry (struct page *p)
 {
-  //printf ("p->owner=%d, cur=%d\n", p->owner->tid, thread_tid ());
   ASSERT (p->owner == thread_current ());
   ASSERT (p != NULL);
   struct frame *f = p->frame;

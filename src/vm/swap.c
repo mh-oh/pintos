@@ -38,7 +38,6 @@ swap_init (void)
 size_t
 swap_out (void* kpage)
 {
-  size_t size = PGSIZE;
   size_t slot;
   block_sector_t sector;
   int i;

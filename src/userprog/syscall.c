@@ -15,6 +15,7 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "vm/page.h"
+#include "vm/frame.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -413,7 +414,7 @@ struct file_desc
 /* Finds a file descriptor with the given FD_NO.
    If not found, returns NULL. */
 static struct file_desc *
-find_file_desc (int fd_no)
+find_fd (int fd_no)
 {
   struct thread *cur = thread_current ();
   struct list *fd_list = &cur->fd_list;
@@ -482,7 +483,7 @@ sys_filesize (int fd_no)
   struct file_desc *fd;
   int res;
 
-  if ((fd = find_file_desc (fd_no)) == NULL)
+  if ((fd = find_fd (fd_no)) == NULL)
     return -1;
   
   lock_acquire (&fs_lock);
@@ -506,7 +507,7 @@ sys_read (int fd_no, void *ubuf, unsigned size)
   if (ubuf == NULL)
     return -1;
   if (fd_no != STDIN_FILENO
-      && (fd = find_file_desc (fd_no)) == NULL)
+      && (fd = find_fd (fd_no)) == NULL)
     return -1;
   
   if (fd_no != STDIN_FILENO)
@@ -566,7 +567,7 @@ sys_write (int fd_no, const void *ubuf, unsigned size)
   if (ubuf == NULL)
     return -1;
   if (fd_no != STDOUT_FILENO
-      && (fd = find_file_desc (fd_no)) == NULL)
+      && (fd = find_fd (fd_no)) == NULL)
     return -1;
   
   if (fd_no != STDOUT_FILENO)
@@ -610,7 +611,7 @@ void
 sys_seek (int fd_no, unsigned position)
 {
   struct file_desc *fd;
-  if ((fd = find_file_desc (fd_no)) == NULL)
+  if ((fd = find_fd (fd_no)) == NULL)
     return;
   
   lock_acquire (&fs_lock);
@@ -626,7 +627,7 @@ sys_tell (int fd_no)
   struct file_desc *fd;
   unsigned res;
   
-  if ((fd = find_file_desc (fd_no)) == NULL)
+  if ((fd = find_fd (fd_no)) == NULL)
     return -1;
   
   lock_acquire (&fs_lock);
@@ -642,7 +643,7 @@ sys_close (int fd_no)
 {
   struct file_desc *fd;
   
-  if ((fd = find_file_desc (fd_no)) == NULL)
+  if ((fd = find_fd (fd_no)) == NULL)
     return;
   
   lock_acquire(&fs_lock);
@@ -662,7 +663,7 @@ struct mmap
     
     /* A user virtual address from which mapping starts. */
     void *addr;
-    /* Number of pages mmapped. */
+    /* Number of pages mmap'ed. */
     size_t pages;
   };
 
@@ -701,7 +702,7 @@ sys_mmap (int fd_no, void *addr)
     return -1;
   if (addr == NULL || pg_ofs (addr) != 0)
     return -1;
-  if ((fd = find_file_desc (fd_no)) == NULL)
+  if ((fd = find_fd (fd_no)) == NULL)
     return -1;
   if ((m = malloc (sizeof (struct mmap))) == NULL)
     return -1;
@@ -772,22 +773,27 @@ do_munmap (struct mmap* m, bool write)
 {
   struct thread *cur = thread_current ();
   struct page *p;
-  size_t write_bytes;
+  off_t write_bytes;
   void *upage;
 
-  list_remove (&m->mmap_list_elem);
+  ASSERT (m != NULL);
 
   for (upage = m->addr; upage < m->addr + PGSIZE * m->pages;
        upage += PGSIZE)
     {
       p = page_lookup (upage);
-      if (write &&
-          pagedir_is_dirty (cur->pagedir, upage))
+
+      ASSERT (p != NULL);
+      ASSERT (p->file == m->file);
+
+      p->dirty |= pagedir_is_dirty (cur->pagedir, p->upage);
+
+      if (write && p->dirty) 
         {
           lock_acquire (&fs_lock);
           write_bytes
             = file_write_at (p->file, p->upage, p->read_bytes, p->file_ofs);
-          if (write_bytes != (int) p->read_bytes)
+          if (write_bytes != (off_t) p->read_bytes)
             PANIC ("panic?");
           lock_release (&fs_lock);
         }
@@ -818,7 +824,7 @@ do_munmap (struct mmap* m, bool write)
 
 /* Closes all opened files of the current process. */
 void
-sys_close_all (void)
+sys_fd_exit (void)
 {
   struct thread *cur = thread_current ();
   struct list *fd_list = &cur->fd_list;
@@ -827,10 +833,26 @@ sys_close_all (void)
       struct file_desc *fd
         = list_entry (list_pop_front (fd_list), struct file_desc,
                       fd_list_elem);
+      
       lock_acquire (&fs_lock);
       file_close (fd->file);
       lock_release (&fs_lock);
+      
       free (fd);
+    }
+}
+
+void
+sys_mmap_exit (void)
+{
+  struct thread *cur = thread_current ();
+  struct list *mmap_list = &cur->mmap_list;
+  while (!list_empty (mmap_list))
+    {
+      struct mmap *m
+        = list_entry (list_front (mmap_list), struct mmap,
+                      mmap_list_elem);
+      do_munmap (m, true);
     }
 }
 

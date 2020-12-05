@@ -320,32 +320,9 @@ process_exit (void)
   struct hash *spt;
   uint32_t *pd;
 
-  /* If a running thread has a process that it has executed.
-     Releases this process from the current thread. */
-  if (cur->process != NULL)
-    {
-      sema_up (&cur->process->exit_wait);
-
-      /* The current thread, that is, a thread that has executed
-         this process no longer owns this process. */
-      release_from_owner (cur->process);
-    }
-  
-  /* Make all child processes release from the current thread. */
-  struct list *child_list = &cur->child_list;
-  while (!list_empty (child_list))
-    {
-      struct process *child
-        = list_entry (list_pop_front (child_list), struct process,
-                      child_list_elem);
-      
-      /* The current process informs its child processes that
-         it is terminating first. */
-      release_from_parent (child);
-    }
-  
-  /* Closes all open files. */
-  sys_close_all ();
+  /*  */
+  sys_fd_exit ();
+  sys_mmap_exit ();
 
   /* Closes the user program. */
   lock_acquire (&fs_lock);
@@ -355,8 +332,6 @@ process_exit (void)
   spt = cur->spt;
   if (spt != NULL)
     page_destroy_spt (spt);
-
-  //printf ("exit.....\n");
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -373,6 +348,29 @@ process_exit (void)
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
+    }
+
+  /* If a running thread has a process that it has executed.
+     Releases this process from the current thread. */
+  if (cur->process != NULL)
+    {
+      sema_up (&cur->process->exit_wait);
+
+      /* The current thread, that is, a thread that has executed
+         this process no longer owns this process. */
+      release_from_owner (cur->process);
+    }
+  
+  /* Make all child processes release from the current thread. */
+  while (!list_empty (&cur->child_list))
+    {
+      struct process *child
+        = list_entry (list_pop_front (&cur->child_list), struct process,
+                      child_list_elem);
+      
+      /* The current process informs its child processes that
+         it is terminating first. */
+      release_from_parent (child);
     }
 }
 
