@@ -11,7 +11,8 @@
 #include "userprog/pagedir.h"
 
 static struct lock table_lock;   /* Mutual exclusion. */
-static struct list frame_list;   /* Mapped frames (list). */
+static struct list frame_list;   /* Mapped frames. */
+static struct list_elem *hand;
 
 static struct lock mutex_lock;
 
@@ -20,10 +21,12 @@ frame_init (void)
 {
   lock_init (&table_lock);
   list_init (&frame_list);
+  hand = NULL;
 
   lock_init (&mutex_lock);
 }
 
+static struct frame *frame_advance_hand (void);
 static struct frame *frame_get_victim (void);
 static void frame_do_eviction (struct page *src, struct page *dst);
 
@@ -75,6 +78,7 @@ frame_alloc (enum palloc_flags flags, struct page *p)
     }
 }
 
+/*
 static struct frame *
 frame_get_victim (void)
 {
@@ -88,6 +92,7 @@ frame_get_victim (void)
     {
       struct frame *f
         = list_entry (e, struct frame, list_elem);
+
       if (f->__owner->tid == cur->tid)
         {
           if (lock_held_by_current_thread (&f->lock))
@@ -95,6 +100,52 @@ frame_get_victim (void)
         }
       if (!lock_try_acquire (&f->lock))
         continue;
+      return f;
+    }
+  NOT_REACHED ();
+}
+*/
+
+static struct frame *
+frame_advance_hand (void)
+{
+  if (hand == NULL)
+    hand = list_begin (&frame_list);
+  else
+    {
+      hand = list_next (hand);
+      if (hand == list_end (&frame_list))
+        hand = list_begin (&frame_list);
+    }
+  return list_entry (hand, struct frame, list_elem);
+}
+
+static struct frame *
+frame_get_victim (void)
+{
+  ASSERT (lock_held_by_current_thread (&table_lock));
+  ASSERT (!list_empty (&frame_list));
+
+  struct frame *f;
+  while ((f = frame_advance_hand ()))
+    {
+      if (f->page == NULL)
+        PANIC ("null???");
+      if (f->page->owner == thread_current ())
+        {
+          if (lock_held_by_current_thread (&f->lock))
+            continue;
+        }
+      if (!lock_try_acquire (&f->lock))
+        continue;
+      if (page_test_and_reset_accessed (f->page))
+        {
+          lock_release (&f->lock);
+          continue;
+        }
+      //printf ("h\n");
+      ASSERT (true);
+      list_remove (&f->list_elem);
       return f;
     }
   NOT_REACHED ();
@@ -159,7 +210,7 @@ frame_free (struct frame *f)
   ASSERT (f != NULL);
   ASSERT (lock_held_by_current_thread (&f->lock));
   list_remove (&f->list_elem);
-  //free (f);
+  free (f);
   //printf ("##### [%d] (frame_free) f=%p is freed.\n", thread_tid (), f);
 }
 

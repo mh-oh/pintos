@@ -76,8 +76,9 @@ page_hash_free (struct hash_elem *e, void *aux UNUSED)
           lock_release (&f->lock);
         }
     }
-
-  //free (p);
+  if (p->slot != BITMAP_ERROR)
+    swap_free (p->slot);
+  free (p);
   
   //printf ("##### [%d] (page_hash_free) p=%p is freed.\n", thread_tid (), p);
 }
@@ -127,6 +128,9 @@ page_remove_entry (struct page *p)
         }
     }
   hash_delete (p->owner->spt, &p->hash_elem);
+
+  if (p->slot != BITMAP_ERROR)
+    swap_free (p->slot);
   free (p);
 }
 
@@ -220,4 +224,17 @@ page_lookup (void *upage)
   e = hash_find (cur->spt, &key.hash_elem);
 
   return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
+}
+
+bool
+page_test_and_reset_accessed (struct page *p)
+{
+  ASSERT (p != NULL);
+
+  uint32_t *pd = p->owner->pagedir;
+  void *upage = p->upage;
+  bool accessed = pagedir_is_accessed (pd, upage);
+  
+  pagedir_set_accessed (pd, upage, false);
+  return accessed;
 }

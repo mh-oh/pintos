@@ -81,3 +81,11 @@ swap_in (void *kpage, size_t slot)
   ASSERT (bitmap_all (used_map, slot, 1));
   bitmap_set_multiple (used_map, slot, 1, false);
 }
+
+void
+swap_free (size_t slot)
+{
+  ASSERT (slot != BITMAP_ERROR);
+  ASSERT (bitmap_all (used_map, slot, 1));
+  bitmap_set_multiple (used_map, slot, 1, false);
+}
