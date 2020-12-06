@@ -141,6 +141,18 @@ syscall_handler (struct intr_frame *f)
   int no;
   SYSCALL_GET_NUMBER (esp, &no);
 
+#ifdef VM
+  /* Saves ESP into struct thread on the initial transition from
+     user to kernel mode.
+     
+     It is needed when a page fault occurs in the kernel.
+     Since the processor only saves the stack pointer when an
+     exception causes a switch from user to kernel mode, reading
+     ESP out of the struct intr_frame passed to page_fault()
+     would yield an undefined value. */
+  thread_current ()->saved_esp = f->esp;
+#endif
+
   /* Invokes system call wrapper function. */
   if (no < 0 || no >= SYSCALL_CNT)
     PANIC ("Unknown system call");

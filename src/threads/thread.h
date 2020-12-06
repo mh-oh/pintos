@@ -131,6 +131,10 @@ struct thread
 #ifdef VM
     /* Shared between userprog/process.c and vm/page.c. */
     struct hash *spt;                   /* Supplemental page table. */
+
+    /* Shared between userprog/syscall.c
+       and userprog/exception.c. */
+    void *saved_esp;                    /* Saved ESP. */
 #endif
 
     /* Owned by thread.c. */
