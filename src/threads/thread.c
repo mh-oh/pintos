@@ -736,7 +736,12 @@ init_thread (struct thread *t, const char *name, int priority)
 
   /* File descriptors. */
   list_init (&t->fd_list);
-  t->next_fd_no = 2;   /* 0 and 1 are reserved. */
+  t->next_fd_no = 2;
+
+#ifdef VM
+  /* Supplemental page table. */
+  t->spt = NULL;
+#endif
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

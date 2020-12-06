@@ -20,6 +20,7 @@
 #include "threads/vaddr.h"
 #include "threads/synch.h"
 #include "threads/malloc.h"
+#include "vm/page.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *exec_path, void (**eip) (void), void **esp);
@@ -349,6 +350,12 @@ process_exit (void)
   file_close (cur->bin);
   lock_release (&fs_lock);
 
+#ifdef VM
+  /* Destroy the current process's supplemental page table. */
+  if (cur->spt != NULL)
+    page_destroy_spt (cur->spt);
+#endif
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -465,6 +472,13 @@ load (const char *exec_path, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
+
+#ifdef VM
+  /* Create supplemental page table. */
+  t->spt = page_create_spt ();
+  if (t->spt == NULL)
+    goto done;
+#endif
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
@@ -646,7 +660,25 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
+#ifdef VM
+      /* Create a supplemental page table entry for UPAGE. */
+      struct page *p = page_make_entry (upage);
+      if (!p)
+        return false;
+      
+      /* Set the page type. */
+      if (page_read_bytes > 0)
+        p->type = PG_FILE;
+      else
+        p->type = PG_ZERO;
+      
+      /* Add supplemental information. */
+      p->file = file;
+      p->file_ofs = ofs;
+      p->read_bytes = page_read_bytes;
+      p->zero_bytes = page_zero_bytes;
+      p->writable = writable;
+#else
       /* Get a page of memory. */
       uint8_t *kpage = palloc_get_page (PAL_USER);
       if (kpage == NULL)
@@ -666,11 +698,15 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           palloc_free_page (kpage);
           return false; 
         }
+#endif
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+#ifdef VM
+      ofs += page_read_bytes;
+#endif
     }
   return true;
 }
@@ -680,6 +716,26 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
+#ifdef VM
+  struct page *p;
+  void *upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
+  bool success = false;
+
+  /* Create a supplemental page table entry for UPAGE. */
+  p = page_make_entry (upage);  
+  if (p != NULL)
+    {
+      /* Add supplemental information. */
+      p->type = PG_ZERO;
+      p->writable = true;
+
+      /* Load UPAGE immediately. */
+      success = page_load (upage);
+      if (success)
+        *esp = PHYS_BASE;
+    }
+  return success;
+#else
   uint8_t *kpage;
   bool success = false;
 
@@ -693,6 +749,7 @@ setup_stack (void **esp)
         palloc_free_page (kpage);
     }
   return success;
+#endif
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel

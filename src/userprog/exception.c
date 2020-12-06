@@ -5,6 +5,8 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -127,6 +129,7 @@ page_fault (struct intr_frame *f)
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
+  void *fault_page;  /* Fault page. */
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -136,6 +139,7 @@ page_fault (struct intr_frame *f)
      [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
      (#PF)". */
   asm ("movl %%cr2, %0" : "=r" (fault_addr));
+  fault_page = pg_round_down (fault_addr);
 
   /* Turn interrupts back on (they were only off so that we could
      be assured of reading CR2 before it changed). */
@@ -148,6 +152,24 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+
+#ifdef VM
+  /* Because executable code and data segments are not immediately
+     loaded in memory during process setup, a not-present page fault
+     occurs when a process accesses unloaded segments later.
+     In this case, the page fault handler should load the user virtual
+     pages and resume the process's execution.
+
+     In order for the handler to know how to load the fault page, each
+     process has already created SPTEs.
+     See load_segment() defined in userprog/process.c. */
+  if (not_present)
+    {
+      if (!page_load (fault_page))
+        sys_exit (-1);
+      return;
+    }
+#endif
 
   /* A page fault in the kernel merely sets EAX to 0xffffffff and
      copies its former value into EIP. This enables returning a -1

@@ -128,6 +128,11 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
 #endif
 
+#ifdef VM
+    /* Shared between userprog/process.c and vm/page.c. */
+    struct hash *spt;                   /* Supplemental page table. */
+#endif
+
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
