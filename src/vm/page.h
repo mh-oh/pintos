@@ -31,7 +31,6 @@ struct page
     struct thread *owner;
 
     enum page_type type;
-    enum page_type prev;
     bool writable;
 
     struct file *file;
@@ -55,7 +54,7 @@ void page_remove_entry (struct page *);
 bool page_load (void *);
 
 struct page *page_lookup (void *);
-bool page_test_and_reset_accessed (struct page *);
+bool page_was_accessed (struct page *);
 
 
 #endif /* vm/page.h */

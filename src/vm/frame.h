@@ -3,7 +3,6 @@
 
 #include <list.h>
 #include "threads/thread.h"
-#include "threads/palloc.h"
 #include "threads/synch.h"
 
 struct page;
@@ -20,13 +19,16 @@ struct frame
   };
 
 void frame_init (void);
-struct frame *frame_alloc (enum palloc_flags, struct page *);
+struct frame *frame_alloc (struct page *);
 void frame_free (struct frame *);
 struct frame *frame_lookup (void *);
 
 void frame_table_lock (void);
 void frame_table_unlock (void);
-void frame_unlock (struct frame *);
+
+void frame_lock_acquire (struct frame *);
+void frame_lock_release (struct frame *);
+bool frame_lock_try_acquire (struct frame *);
 
 bool frame_try_pin (struct frame *);
 void frame_unpin (struct frame *);

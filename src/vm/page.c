@@ -67,13 +67,13 @@ page_hash_free (struct hash_elem *e, void *aux UNUSED)
   struct frame *f = p->frame;
   if (f != NULL)
     {
-      lock_acquire (&f->lock);
+      frame_lock_acquire (f);
       if (f == p->frame)
         frame_free (f);
       else
         {
           ASSERT (p->frame == NULL);
-          lock_release (&f->lock);
+          frame_lock_release (f);
         }
     }
   if (p->slot != BITMAP_ERROR)
@@ -118,13 +118,13 @@ page_remove_entry (struct page *p)
   struct frame *f = p->frame;
   if (f != NULL)
     {
-      lock_acquire (&f->lock);
+      frame_lock_acquire (f);
       if (f == p->frame)
         frame_free (f);
       else
         {
           ASSERT (p->frame == NULL);
-          lock_release (&f->lock);
+          frame_lock_release (f);
         }
     }
   hash_delete (p->owner->spt, &p->hash_elem);
@@ -150,7 +150,7 @@ page_load (void *upage)
   //ASSERT (p->frame == NULL);
 
   //printf ("##### [%d] (page_load) loading... p=%p, p->type=%d, p->upage=%p\n", thread_tid (), p, p->type, p->upage);
-  struct frame *f = p->frame = frame_alloc (PAL_USER, p);
+  struct frame *f = p->frame = frame_alloc (p);
   switch (p->type)
     {
     case PG_FILE:
@@ -190,7 +190,7 @@ page_load (void *upage)
     goto fail;
 
   //frame_unpin (f);
-  frame_unlock (f);
+  frame_lock_release (f);
   return true;
 
  fail:
@@ -227,7 +227,7 @@ page_lookup (void *upage)
 }
 
 bool
-page_test_and_reset_accessed (struct page *p)
+page_was_accessed (struct page *p)
 {
   ASSERT (p != NULL);
 

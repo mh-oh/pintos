@@ -31,21 +31,19 @@ static struct frame *frame_get_victim (void);
 static void frame_do_eviction (struct page *src, struct page *dst);
 
 struct frame *
-frame_alloc (enum palloc_flags flags, struct page *p)
+frame_alloc (struct page *p)
 {
-  struct frame *f;
-
-  ASSERT (flags & PAL_USER);
   ASSERT (p != NULL);
   ASSERT (p->owner == thread_current ());
 
   lock_acquire (&table_lock);
 
+  struct frame *f;
   if ((f = malloc (sizeof (struct frame))) == NULL)
     PANIC ("cannot allocate frame table entry.");
   lock_init (&f->lock);
 
-  f->kpage = palloc_get_page (flags);
+  f->kpage = palloc_get_page (PAL_USER);
   if (f->kpage != NULL)
     {
       //printf ("##### [%d] (frame_alloc) f=%p is malloced and locked. f->kpage=%p\n", thread_tid (), f, f->kpage);
@@ -131,16 +129,11 @@ frame_get_victim (void)
     {
       if (f->page == NULL)
         PANIC ("null???");
-      if (f->page->owner == thread_current ())
-        {
-          if (lock_held_by_current_thread (&f->lock))
-            continue;
-        }
-      if (!lock_try_acquire (&f->lock))
+      if (!frame_lock_try_acquire (f))
         continue;
-      if (page_test_and_reset_accessed (f->page))
+      if (page_was_accessed (f->page))
         {
-          lock_release (&f->lock);
+          frame_lock_release (f);
           continue;
         }
       //printf ("h\n");
@@ -279,4 +272,30 @@ frame_unpin (struct frame *f)
   f->pinned = false;
   ////printf ("##### [%d] (frame_unpin) f=%p is unpinned.\n", thread_tid (), f);
   lock_release (&mutex_lock);
+}
+
+void 
+frame_lock_acquire (struct frame *f)
+{
+  ASSERT (f != NULL);
+  lock_acquire (&f->lock);
+}
+
+void 
+frame_lock_release (struct frame *f)
+{
+  ASSERT (f != NULL);
+  lock_release (&f->lock);
+}
+
+bool 
+frame_lock_try_acquire (struct frame *f)
+{
+  ASSERT (f != NULL);
+  if (f->page->owner == thread_current ())
+    {
+      if (lock_held_by_current_thread (&f->lock))
+        return false;
+    }
+  return lock_try_acquire (&f->lock);
 }
