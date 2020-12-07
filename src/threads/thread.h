@@ -112,15 +112,18 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
-    /* Shared between thread.c and process.c. */
+    /* Shared between thread.c and
+       userprog/process.c. */
     struct process *process;            /* My process control block. */
     struct list child_list;             /* List of child process control block. */
 
-    /* Shared between thread.c and syscall.c. */
+    /* Shared between thread.c and
+       userprog/syscall.c. */
     struct list fd_list;                /* List of file descriptors. */
     int next_fd_no;                     /* Next file descriptor number. */
 
-    /* Shared between thread.c and process.c. */
+    /* Shared between thread.c and
+       userprog/process.c. */
     struct file *bin;                   /* A user program. */
 
 #ifdef USERPROG
@@ -129,12 +132,18 @@ struct thread
 #endif
 
 #ifdef VM
-    /* Shared between userprog/process.c and vm/page.c. */
+    /* Shared between userprog/process.c
+       and vm/page.c. */
     struct hash *spt;                   /* Supplemental page table. */
 
     /* Shared between userprog/syscall.c
        and userprog/exception.c. */
     void *saved_esp;                    /* Saved ESP. */
+
+    /* Shared between thread.c and
+       userprog/syscall.c */
+    struct list mmap_list;              /* List of mmap mappings. */
+    int next_mapid;                     /* Next mmap id. */
 #endif
 
     /* Owned by thread.c. */

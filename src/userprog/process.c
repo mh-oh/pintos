@@ -343,7 +343,12 @@ process_exit (void)
     }
   
   /* Closes all open files. */
-  sys_close_all ();
+  sys_fd_exit ();
+
+#ifdef VM
+  /* Unmaps all mmap mappings. */
+  sys_mmap_exit ();
+#endif
 
   /* Closes the user program. */
   lock_acquire (&fs_lock);

@@ -13,15 +13,23 @@
 #include "devices/input.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "vm/page.h"
+#include "vm/frame.h"
 
 static void syscall_handler (struct intr_frame *);
 
 /* Number of system calls. */
+#ifdef VM
+#define SYSCALL_CNT 15
+#else
 #define SYSCALL_CNT 13
+#endif
 
 /* Wrapper functions for each system call.
    Each of them safely reads sycall arguments and invokes system
    call service. */
+
+/* Projects 2 and later. */
 static void sys_halt_wrapper     (struct intr_frame *);
 static void sys_exit_wrapper     (struct intr_frame *);
 static void sys_exec_wrapper     (struct intr_frame *);
@@ -35,6 +43,12 @@ static void sys_write_wrapper    (struct intr_frame *);
 static void sys_seek_wrapper     (struct intr_frame *);
 static void sys_tell_wrapper     (struct intr_frame *);
 static void sys_close_wrapper    (struct intr_frame *);
+
+#ifdef VM
+/* Project 3 and optionally project 4. */
+static void sys_mmap_wrapper     (struct intr_frame *);
+static void sys_munmap_wrapper   (struct intr_frame *);
+#endif
 
 /* Prototypes. */
 void     sys_halt (void);
@@ -50,6 +64,10 @@ int      sys_write (int, const void *, unsigned);
 void     sys_seek (int, unsigned);
 unsigned sys_tell (int);
 void     sys_close (int);
+#ifdef VM
+mapid_t  sys_mmap (int, void *);
+void     sys_munmap (mapid_t);
+#endif
 
 /* In Pintos, system call number and arguments are all 32-bit
    values.  See lib/user/syscall.c */
@@ -118,7 +136,7 @@ syscall_init (void)
 
   lock_init (&fs_lock);
 
-  /* Initialize system call wrappers. */
+  /* Projects 2 and later. */
   sys_wrap_funcs[SYS_HALT]     = sys_halt_wrapper;
   sys_wrap_funcs[SYS_EXIT]     = sys_exit_wrapper;
   sys_wrap_funcs[SYS_EXEC]     = sys_exec_wrapper;
@@ -132,6 +150,12 @@ syscall_init (void)
   sys_wrap_funcs[SYS_SEEK]     = sys_seek_wrapper;
   sys_wrap_funcs[SYS_TELL]     = sys_tell_wrapper;
   sys_wrap_funcs[SYS_CLOSE]    = sys_close_wrapper;
+
+#ifdef VM
+  /* Project 3 and optionally project 4. */
+  sys_wrap_funcs[SYS_MMAP]     = sys_mmap_wrapper;
+  sys_wrap_funcs[SYS_MUNMAP]   = sys_munmap_wrapper;
+#endif
 }
 
 static void
@@ -399,7 +423,7 @@ struct file_desc
 /* Finds a file descriptor with the given FD_NO.
    If not found, returns NULL. */
 static struct file_desc *
-find_file_desc (int fd_no)
+lookup_fd (int fd_no)
 {
   struct thread *cur = thread_current ();
   struct list *fd_list = &cur->fd_list;
@@ -468,7 +492,7 @@ sys_filesize (int fd_no)
   struct file_desc *fd;
   int res;
 
-  if ((fd = find_file_desc (fd_no)) == NULL)
+  if ((fd = lookup_fd (fd_no)) == NULL)
     return -1;
   
   lock_acquire (&fs_lock);
@@ -492,7 +516,7 @@ sys_read (int fd_no, void *ubuf, unsigned size)
   if (ubuf == NULL)
     return -1;
   if (fd_no != STDIN_FILENO
-      && (fd = find_file_desc (fd_no)) == NULL)
+      && (fd = lookup_fd (fd_no)) == NULL)
     return -1;
   
   if (fd_no != STDIN_FILENO)
@@ -552,7 +576,7 @@ sys_write (int fd_no, const void *ubuf, unsigned size)
   if (ubuf == NULL)
     return -1;
   if (fd_no != STDOUT_FILENO
-      && (fd = find_file_desc (fd_no)) == NULL)
+      && (fd = lookup_fd (fd_no)) == NULL)
     return -1;
   
   if (fd_no != STDOUT_FILENO)
@@ -596,7 +620,7 @@ void
 sys_seek (int fd_no, unsigned position)
 {
   struct file_desc *fd;
-  if ((fd = find_file_desc (fd_no)) == NULL)
+  if ((fd = lookup_fd (fd_no)) == NULL)
     return;
   
   lock_acquire (&fs_lock);
@@ -612,7 +636,7 @@ sys_tell (int fd_no)
   struct file_desc *fd;
   unsigned res;
   
-  if ((fd = find_file_desc (fd_no)) == NULL)
+  if ((fd = lookup_fd (fd_no)) == NULL)
     return -1;
   
   lock_acquire (&fs_lock);
@@ -628,7 +652,7 @@ sys_close (int fd_no)
 {
   struct file_desc *fd;
   
-  if ((fd = find_file_desc (fd_no)) == NULL)
+  if ((fd = lookup_fd (fd_no)) == NULL)
     return;
   
   lock_acquire(&fs_lock);
@@ -639,9 +663,206 @@ sys_close (int fd_no)
   free (fd);
 }
 
+#ifdef VM
+/* A mmap mapping. */
+struct mmap
+  {
+    struct list_elem mmap_list_elem;   /* List element. */
+    struct file *file;                 /* File. */
+    mapid_t mapid;                     /* Mmap id. */
+    
+    /* A user virtual address from which mapping starts. */
+    void *addr;
+    /* Number of pages mmap'ed. */
+    size_t pages;
+  };
+
+/* Finds a file descriptor with the given FD_NO.
+   If not found, returns NULL. */
+static struct mmap *
+lookup_mmap (mapid_t mapid)
+{
+  struct thread *cur = thread_current ();
+  struct list *mmap_list = &cur->mmap_list;
+  struct list_elem *e;
+  for (e = list_begin (mmap_list); e != list_end (mmap_list);
+       e = list_next (e))
+    {
+      struct mmap *m
+        = list_entry (e, struct mmap, mmap_list_elem);
+      if (m->mapid == mapid)
+        return m;
+    }
+  return NULL;
+}
+
+static void do_munmap (struct mmap *, bool);
+
+/* Maps the file open as FD_NO into the process's virtual
+   address space.  The entire file is mapped into consecutive
+   virtual pages starting at ADDR.  If the file's length is
+   not a multiple of PGSIZE, then some bytes in a page is
+   filled with zeros.
+   
+   If successful, this function returns a mapping id that
+   uniquely indentifies the mmap mapping within the process.
+   On failure, it returns -1 and the process's mappings are
+   unchanged.
+
+   A call to mmap() may fail if the file open as FD_NO has a
+   length of zero bytes.  It must fail if ADDR is not
+   "page-aligned" or if the range of pages mapped overlaps any
+   existing set of mapped pages, including the stack or pages
+   mapped at executable load time.  It must also fail if
+   ADDR is 0.  Finally, file descriptors 0 and 1, representing
+   console input and output, are not mappable.
+
+   Closing or removing a file does not unmap any of its mappings.
+   Once created, a mapping is valid until munmap() is called
+   or the process exits, following the Unix convention.
+   We used the file_reopen() function to obtain a separate and
+   independent reference to the file for each of its mappings. */
+mapid_t
+sys_mmap (int fd_no, void *addr)
+{
+  struct thread *cur = thread_current ();
+  struct file_desc *fd;
+  struct file *f;
+  struct mmap *m;
+  size_t size;
+  off_t ofs = 0;
+
+  if (fd_no == STDIN_FILENO || fd_no == STDOUT_FILENO)
+    return -1;
+  if (addr == NULL || pg_ofs (addr) != 0)
+    return -1;
+  if ((fd = lookup_fd (fd_no)) == NULL)
+    return -1;
+  if ((m = malloc (sizeof (struct mmap))) == NULL)
+    return -1;
+  
+  lock_acquire (&fs_lock);
+  if ((f = file_reopen (fd->file)) == NULL)
+    {
+      lock_release (&fs_lock);
+      free (m);
+      return -1;
+    }
+  lock_release (&fs_lock);
+
+  m->file = f;
+  m->mapid = cur->next_mapid++;
+  m->addr = addr;
+  m->pages = 0;
+  list_push_back (&cur->mmap_list, &m->mmap_list_elem);
+
+  lock_acquire (&fs_lock);
+  size = file_length (m->file);
+  lock_release (&fs_lock);
+
+  if (size == 0)
+    return -1;
+
+  while (size > 0)
+    {
+      /* Calculate how to fill this page.
+         We will read PAGE_READ_BYTES bytes from the file F
+         and zero the final PAGE_ZERO_BYTES bytes. */
+      size_t page_read_bytes = (size > PGSIZE) ? PGSIZE : size;
+      size_t page_zero_bytes = PGSIZE - page_read_bytes;
+      struct page *p;
+
+      /* If the range of pages mapped overlaps any existing set
+         of user virtual pages, mmap() fails. */
+      if ((p = page_make_entry (addr)) == NULL)
+        goto munmap;
+      m->pages++;
+
+      p->type = PG_FILE;
+      p->writable = true;
+
+      p->file = f;
+      p->read_bytes = page_read_bytes;
+      p->zero_bytes = page_zero_bytes;
+      p->file_ofs = ofs;
+
+      size -= page_read_bytes;
+      addr += PGSIZE;
+      ofs  += page_read_bytes;
+    }  
+
+  return m->mapid;
+
+ munmap:
+  do_munmap (m, false);
+  return -1;
+}
+
+/* Unmaps the mapping designated by MAPID, which must be a
+   mapping id returned by a previous call to mmap() by the
+   same process that has not yet been unmapped. */
+void
+sys_munmap (mapid_t mapid)
+{
+  struct mmap *m;
+  if ((m = lookup_mmap (mapid)) == NULL)
+    return;
+  do_munmap (m, true);
+}
+
+/* Performs a core functionality of munmap().  It first closes
+   the open file and removes mmap entry M from process's mapping
+   list.  Then, it writes back every user virtual page to the
+   mmapped file only if WRITE is true "and" the user page is dirty.
+   
+   Every SPTE and physical frame allocated to this SPTE, if any,
+   are removed and freed.  */
+static void
+do_munmap (struct mmap* m, bool write)
+{
+  struct thread *cur = thread_current ();
+  struct page *p;
+  void *upage;
+
+  ASSERT (m != NULL);
+
+  /* For each mmap'ed page, */
+  for (upage = m->addr; upage < m->addr + PGSIZE * m->pages;
+       upage += PGSIZE)
+    {
+      p = page_lookup (upage);
+
+      ASSERT (p != NULL);
+      ASSERT (p->file == m->file);
+
+      /* Here, UPAGE could have been evicted; the current process
+         does not have any virtual mapping for UPAGE.  The function
+         pagedir_is_dirty() returns false, if a page is dirty or
+         "there is no mapping" between UPAGE and a physical frame. */
+      p->dirty |= pagedir_is_dirty (cur->pagedir, p->upage);
+
+      if (write && p->dirty) 
+        {
+          /* Write back the page's contents. */
+          lock_acquire (&fs_lock);
+          file_write_at (p->file, p->upage, p->read_bytes, p->file_ofs);
+          lock_release (&fs_lock);
+        }
+      page_remove_entry (p);
+    }
+  
+  lock_acquire (&fs_lock);
+  file_close (m->file);
+  lock_release (&fs_lock);
+  
+  list_remove (&m->mmap_list_elem);
+  free (m);
+}
+#endif
+
 /* Closes all opened files of the current process. */
 void
-sys_close_all (void)
+sys_fd_exit (void)
 {
   struct thread *cur = thread_current ();
   struct list *fd_list = &cur->fd_list;
@@ -650,12 +871,37 @@ sys_close_all (void)
       struct file_desc *fd
         = list_entry (list_pop_front (fd_list), struct file_desc,
                       fd_list_elem);
+      
       lock_acquire (&fs_lock);
       file_close (fd->file);
       lock_release (&fs_lock);
+      
       free (fd);
     }
 }
+
+#ifdef VM
+/* Unmaps all mmap mappings.
+   All mappings are implicitly unmapped when a process exits,
+   whether via exit or by any other means.  When a mapping is
+   unmapped, whether implicitly or explicitly, all pages written
+   to by the process are written back to the file, and pages
+   not written must not be.  The pages are then removed from
+   the process's list of virtual pages. */
+void
+sys_mmap_exit (void)
+{
+  struct thread *cur = thread_current ();
+  struct list *mmap_list = &cur->mmap_list;
+  while (!list_empty (mmap_list))
+    {
+      struct mmap *m
+        = list_entry (list_front (mmap_list), struct mmap,
+                      mmap_list_elem);
+      do_munmap (m, true);
+    }
+}
+#endif
 
 /* System call wrapper function implementations.
    Each wrapper function, if needed, reads passed arguments
@@ -762,6 +1008,24 @@ sys_close_wrapper (struct intr_frame *f)
   SYSCALL_GET_ARGS1 (f->esp, &ARG0);
   sys_close ((int) ARG0);
 }
+
+#ifdef VM
+static void
+sys_mmap_wrapper (struct intr_frame *f)
+{
+  sys_param_type ARG0, ARG1;
+  SYSCALL_GET_ARGS2 (f->esp, &ARG0, &ARG1);
+  f->eax = sys_mmap ((int) ARG0, (void *) ARG1);
+}
+
+static void
+sys_munmap_wrapper (struct intr_frame *f)
+{
+  sys_param_type ARG0;
+  SYSCALL_GET_ARGS1 (f->esp, &ARG0);
+  sys_munmap ((mapid_t) ARG0);
+}
+#endif
 
 /* Handles invalid user-provided pointer access. */
 static void
