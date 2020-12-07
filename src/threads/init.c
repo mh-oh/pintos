@@ -133,6 +133,7 @@ main (void)
 #ifdef VM
   /* Initialize virtual memory system. */
   frame_init ();
+  swap_init ();
 #endif
 
   printf ("Boot complete.\n");

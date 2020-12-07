@@ -1,5 +1,6 @@
 #include "vm/page.h"
 #include "vm/frame.h"
+#include "vm/swap.h"
 #include <debug.h>
 #include <string.h>
 #include <hash.h>
@@ -29,7 +30,7 @@ page_create_spt (void)
    entries.
    If SPTE holds a FTE created by frame_alloc(), it is freed too.
    
-   Importantly, the actual physical frame associated with the FTE
+   Importantly, the actual physical frame corresponding to the FTE
    is not freed, because this frame should be deallocated by
    pagedir_destroy() when a process exits. */
 void
@@ -94,6 +95,9 @@ page_make_entry (void *upage)
 
   p->type = PG_UNKNOWN;
   p->file = NULL;
+  p->slot = BITMAP_ERROR;
+
+  p->dirty = false;
 
   hash_insert (cur->spt, &p->hash_elem);
   return p;
@@ -102,7 +106,7 @@ page_make_entry (void *upage)
 /* Removes a SPTE given the pointer P.
    If SPTE holds a FTE created by frame_alloc(), it is freed too.
    
-   Importantly, the actual physical frame associated with the FTE
+   Importantly, the actual physical frame corresponding to the FTE
    is not freed, because this frame should be deallocated by
    pagedir_destroy() when a process exits. */
 void
@@ -121,8 +125,8 @@ static bool install_page (void *upage, void *kpage, bool writable);
 /* Loads a user virtual page at UPAGE.
 
    If the current process's SPT does not contain any SPTE
-   associated with the virtual page UPAGE, this function returns
-   false.
+   corresponding to the virtual page UPAGE, page_load()
+   returns false.
    
    Otherwise, it allocates a frame for the SPTE and loads the
    contents of the page from file or swap slot, or fills with
@@ -138,7 +142,7 @@ page_load (void *upage)
   if (!p)
     return false;
 
-  struct frame *f = p->frame = frame_alloc ();
+  struct frame *f = frame_alloc (p);
   switch (p->type)
     {
     case PG_FILE:
@@ -152,7 +156,9 @@ page_load (void *upage)
       }
     
     case PG_SWAP:
-      PANIC ("not implemented yet. swap.");
+      swap_in (f->kpage, p->slot);
+      p->slot = BITMAP_ERROR;
+      break;
     
     case PG_ZERO:
       memset (f->kpage, 0, PGSIZE);
@@ -195,7 +201,7 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
-/* Finds a SPTE associated with the given UPAGE.
+/* Finds a SPTE corresponding to the given UPAGE.
    If not found, returns NULL. */
 struct page *
 page_lookup (void *upage)
