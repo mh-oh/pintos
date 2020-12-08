@@ -18,9 +18,6 @@ static struct list frame_list;
    frame table. */
 static struct list_elem *hand;
 
-/* Mutual exclusion during pin or unpin. */
-static struct lock pinning;
-
 /* Initializes the frame allocatior.
    All allocated frames are stored in the FRAME_LIST and
    managed globally. */
@@ -30,8 +27,6 @@ frame_init (void)
   lock_init (&table_lock);
   list_init (&frame_list);
   hand = NULL;
-
-  lock_init (&pinning);
 }
 
 static struct frame *frame_advance_hand (void);
@@ -58,6 +53,11 @@ frame_alloc (struct page *p)
       f = malloc (sizeof (struct frame));
       if (f == NULL)
         PANIC ("cannot allocate a frame table entry.");
+
+      /* F is locked until it is released inside
+         page_load(). */
+      lock_init (&f->lock);
+      lock_acquire (&f->lock);
 
       /* One-to-one correspondence. */
       f->kpage = kpage;
@@ -100,28 +100,21 @@ frame_get_victim (void)
 {
   ASSERT (lock_held_by_current_thread (&table_lock));
   ASSERT (!list_empty (&frame_list));
-  /*
+
   struct frame *f;
   while ((f = frame_advance_hand ()))
     {
-      if (!f->page)
+      ASSERT (f->page != NULL);
+
+      if (!frame_lock_try_acquire (f))
         continue;
       if (page_was_accessed (f->page))
-        continue;
+        {
+          frame_lock_release (f);
+          continue;
+        }
 
       list_remove (&f->list_elem);
-      return f;
-    }
-  NOT_REACHED ();
-  */
-  struct list_elem *e;
-  for (e = list_begin (&frame_list); e != list_end (&frame_list);
-       e = list_next (e))
-    {
-      struct frame *f
-        = list_entry (e, struct frame, list_elem);
-      if (!frame_try_pin (f))
-        continue;
       return f;
     }
   NOT_REACHED ();
@@ -189,34 +182,47 @@ void
 frame_free (struct frame *f)
 {
   ASSERT (f != NULL);
+  ASSERT (lock_held_by_current_thread (&f->lock));
+
   lock_acquire (&table_lock);
   list_remove (&f->list_elem);
   free (f);
   lock_release (&table_lock);
 }
 
-/* Atomically tries to pin F and returns true if successful or false
-   on failure. */
-bool
-frame_try_pin (struct frame *f)
+/* Acquires FTE F's LOCK, waiting until it becomes available
+   if necessary.  The lock must not already be held by the
+   current thread. */
+void 
+frame_lock_acquire (struct frame *f)
 {
   ASSERT (f != NULL);
-  bool success;
-
-  lock_acquire (&pinning);
-  success = !f->pinned;
-  f->pinned = true;
-  lock_release (&pinning);
-  
-  return success;
+  lock_acquire (&f->lock);
 }
 
-/* Atomically unpins F. */
-void
-frame_unpin (struct frame *f) 
+/* Releases FTE F's LOCK, which must be owned by the current
+   thread. */
+void 
+frame_lock_release (struct frame *f)
 {
   ASSERT (f != NULL);
-  lock_acquire (&pinning);
-  f->pinned = false;
-  lock_release (&pinning);
+  lock_release (&f->lock);
+}
+
+/* Tries to acquires FTE F's LOCK and returns true if successful
+   or false on failure.
+   
+   Contrast to the lock_try_acquire() where kernel panics if
+   the lock is already held by the current thread, this function
+   just returns false. */
+bool 
+frame_lock_try_acquire (struct frame *f)
+{
+  ASSERT (f != NULL);
+  if (f->page->owner == thread_current ())
+    {
+      if (lock_held_by_current_thread (&f->lock))
+        return false;
+    }
+  return lock_try_acquire (&f->lock);
 }

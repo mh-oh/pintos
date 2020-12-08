@@ -14,7 +14,7 @@ static unsigned page_hash_func (const struct hash_elem *, void *);
 static bool page_hash_less (const struct hash_elem *, const struct hash_elem *, void *);
 static void page_hash_free (struct hash_elem *, void *);
 
-static void page_destruct_frame (struct page *);
+static void wait_and_destruct_frame (struct page *);
 
 /* Creates and initializes a supplemental page table (SPT).
    This table stores SPTEs using their UPAGE as a key. */
@@ -64,12 +64,12 @@ static void
 page_hash_free (struct hash_elem *e, void *aux UNUSED)
 {
   struct page *p = hash_entry (e, struct page, hash_elem);
-  page_destruct_frame (p);
+  wait_and_destruct_frame (p);
   free (p);
 }
 
 /* Waits until P's frame eviction completes, if being processed,
-   and then removes it if possible.
+   and then removes its FTE if possible.
    It is used by page_hash_free() and page_remove_entry().
    
    During the eviction of physical frame, the corresponding FTE
@@ -88,30 +88,29 @@ page_hash_free (struct hash_elem *e, void *aux UNUSED)
    or explicit call to page_remove_entry(), P2's referencing is
    invalid. */
 static void
-page_destruct_frame (struct page *p)
+wait_and_destruct_frame (struct page *p)
 {
   struct frame *f = p->frame;
 
   /* P owns F. */
   if (f != NULL)
     {
-      /* If F is a victim frame, wait until frame F is
-         being evicted; otherwise do not enter this loop. */
-      while (!frame_try_pin (f))
-        thread_yield ();
+      /* If F is a victim frame, wait until evicting F
+         completes; otherwise do not. */
+      frame_lock_acquire (f);
       
-      /* From now on, F is pinned. */
+      /* From now on, F is locked. */
 
       if (p->frame == NULL)
         {
           /* F was evicted from P; during the eviction, the FRAME
              member of P was set to NULL.  That is, P does not
-             own F anymore, thus unpin. */
-          frame_unpin (f);
+             own F anymore, thus release lock. */
+          frame_lock_release (f);
         }
       else
         {
-          /* F was not a victim; P owns F with pin.
+          /* F was not a victim; P owns F with being locked.
              It is safe to free F because it cannot be a victim
              anymore. */
           frame_free (f);
@@ -141,7 +140,9 @@ page_make_entry (void *upage)
   if (!p)
     PANIC ("cannot create supplemental page table entry.");
   
+  /* One-to-one correspondence. */
   p->upage = upage;
+
   p->frame = NULL;
   p->owner = cur;
 
@@ -166,8 +167,8 @@ page_remove_entry (struct page *p)
 {
   ASSERT (p->owner == thread_current ());
   ASSERT (p != NULL);
-  if (p->frame)
-    frame_free (p->frame);
+
+  wait_and_destruct_frame (p);
   hash_delete (p->owner->spt, &p->hash_elem);
   free (p);
 }
@@ -226,7 +227,7 @@ page_load (void *upage)
   if (!install_page (upage, f->kpage, p->writable)) 
     goto fail;
 
-  frame_unpin (f);
+  frame_lock_release (f);
   return true;
 
  fail:

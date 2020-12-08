@@ -3,6 +3,7 @@
 
 #include <list.h>
 #include <stdbool.h>
+#include "threads/synch.h"
 
 /* A frame table entry (FTE) which holds a kernel virtual address
    identifying a physical frame palloc'ed from user pool.
@@ -32,7 +33,9 @@ struct frame
        See page.h. */
     struct page *page;
 
-    bool pinned;
+    /* Protects a critical section that might be generated during
+       frame eviction. */
+    struct lock lock;
 
     struct list_elem list_elem;
   };
@@ -41,7 +44,8 @@ void frame_init (void);
 struct frame *frame_alloc (struct page *);
 void frame_free (struct frame *);
 
-bool frame_try_pin (struct frame *);
-void frame_unpin (struct frame *);
+void frame_lock_acquire (struct frame *);
+void frame_lock_release (struct frame *);
+bool frame_lock_try_acquire (struct frame *);
 
 #endif /* vm/frame.h */
