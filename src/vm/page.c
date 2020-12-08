@@ -219,3 +219,22 @@ page_lookup (void *upage)
 
   return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
 }
+
+/* Returns true, only if the PTE for user virtual page UPAGE
+   corresponding to the given SPTE P in the page directory of P's
+   owner process has been accessed recently, that is, between
+   the time the PTE was installed and the last time it was cleared;
+   otherwise it returns false.
+   This function also resets the accessed bit to false in the PTE. */
+bool
+page_was_accessed (struct page *p)
+{
+  ASSERT (p != NULL);
+
+  uint32_t *pd = p->owner->pagedir;
+  void *upage = p->upage;
+  bool accessed = pagedir_is_accessed (pd, upage);
+  pagedir_set_accessed (pd, upage, false);
+
+  return accessed;
+}

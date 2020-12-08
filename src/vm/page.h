@@ -91,5 +91,7 @@ void page_remove_entry (struct page *);
 bool page_load (void *);
 struct page *page_lookup (void *);
 
+bool page_was_accessed (struct page *);
+
 
 #endif /* vm/page.h */
