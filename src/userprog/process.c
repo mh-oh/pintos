@@ -317,6 +317,40 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+  
+  /* Close the user program. */
+  lock_acquire (&fs_lock);
+  file_close (cur->bin);
+  lock_release (&fs_lock);
+
+  /* Close all open files. */
+  sys_fd_exit ();
+
+#ifdef VM
+  /* Unmap all mmap mappings. */
+  sys_mmap_exit ();
+
+  /* Destroy the current process's supplemental page table. */
+  if (cur->spt != NULL)
+    page_destroy_spt (cur->spt);
+#endif
+
+  /* Destroy the current process's page directory and switch back
+     to the kernel-only page directory. */
+  pd = cur->pagedir;
+  if (pd != NULL) 
+    {
+      /* Correct ordering here is crucial.  We must set
+         cur->pagedir to NULL before switching page directories,
+         so that a timer interrupt can't switch back to the
+         process page directory.  We must activate the base page
+         directory before destroying the process's page
+         directory, or our active page directory will be one
+         that's been freed (and cleared). */
+      cur->pagedir = NULL;
+      pagedir_activate (NULL);
+      pagedir_destroy (pd);
+    }
 
   /* If a running thread has a process that it has executed.
      Releases this process from the current thread. */
@@ -340,42 +374,6 @@ process_exit (void)
       /* The current process informs its child processes that
          it is terminating first. */
       release_from_parent (child);
-    }
-  
-  /* Closes all open files. */
-  sys_fd_exit ();
-
-#ifdef VM
-  /* Unmaps all mmap mappings. */
-  sys_mmap_exit ();
-#endif
-
-  /* Closes the user program. */
-  lock_acquire (&fs_lock);
-  file_close (cur->bin);
-  lock_release (&fs_lock);
-
-#ifdef VM
-  /* Destroy the current process's supplemental page table. */
-  if (cur->spt != NULL)
-    page_destroy_spt (cur->spt);
-#endif
-
-  /* Destroy the current process's page directory and switch back
-     to the kernel-only page directory. */
-  pd = cur->pagedir;
-  if (pd != NULL) 
-    {
-      /* Correct ordering here is crucial.  We must set
-         cur->pagedir to NULL before switching page directories,
-         so that a timer interrupt can't switch back to the
-         process page directory.  We must activate the base page
-         directory before destroying the process's page
-         directory, or our active page directory will be one
-         that's been freed (and cleared). */
-      cur->pagedir = NULL;
-      pagedir_activate (NULL);
-      pagedir_destroy (pd);
     }
 }
 
