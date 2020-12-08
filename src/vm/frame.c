@@ -18,6 +18,9 @@ static struct list frame_list;
    frame table. */
 static struct list_elem *hand;
 
+/* Mutual exclusion during pin or unpin. */
+static struct lock pinning;
+
 /* Initializes the frame allocatior.
    All allocated frames are stored in the FRAME_LIST and
    managed globally. */
@@ -27,6 +30,8 @@ frame_init (void)
   lock_init (&table_lock);
   list_init (&frame_list);
   hand = NULL;
+
+  lock_init (&pinning);
 }
 
 static struct frame *frame_advance_hand (void);
@@ -95,7 +100,7 @@ frame_get_victim (void)
 {
   ASSERT (lock_held_by_current_thread (&table_lock));
   ASSERT (!list_empty (&frame_list));
-
+  /*
   struct frame *f;
   while ((f = frame_advance_hand ()))
     {
@@ -105,6 +110,18 @@ frame_get_victim (void)
         continue;
 
       list_remove (&f->list_elem);
+      return f;
+    }
+  NOT_REACHED ();
+  */
+  struct list_elem *e;
+  for (e = list_begin (&frame_list); e != list_end (&frame_list);
+       e = list_next (e))
+    {
+      struct frame *f
+        = list_entry (e, struct frame, list_elem);
+      if (!frame_try_pin (f))
+        continue;
       return f;
     }
   NOT_REACHED ();
@@ -172,6 +189,34 @@ void
 frame_free (struct frame *f)
 {
   ASSERT (f != NULL);
+  lock_acquire (&table_lock);
   list_remove (&f->list_elem);
   free (f);
+  lock_release (&table_lock);
+}
+
+/* Atomically tries to pin F and returns true if successful or false
+   on failure. */
+bool
+frame_try_pin (struct frame *f)
+{
+  ASSERT (f != NULL);
+  bool success;
+
+  lock_acquire (&pinning);
+  success = !f->pinned;
+  f->pinned = true;
+  lock_release (&pinning);
+  
+  return success;
+}
+
+/* Atomically unpins F. */
+void
+frame_unpin (struct frame *f) 
+{
+  ASSERT (f != NULL);
+  lock_acquire (&pinning);
+  f->pinned = false;
+  lock_release (&pinning);
 }

@@ -14,6 +14,8 @@ static unsigned page_hash_func (const struct hash_elem *, void *);
 static bool page_hash_less (const struct hash_elem *, const struct hash_elem *, void *);
 static void page_hash_free (struct hash_elem *, void *);
 
+static void page_destruct_frame (struct page *);
+
 /* Creates and initializes a supplemental page table (SPT).
    This table stores SPTEs using their UPAGE as a key. */
 struct hash *
@@ -62,9 +64,59 @@ static void
 page_hash_free (struct hash_elem *e, void *aux UNUSED)
 {
   struct page *p = hash_entry (e, struct page, hash_elem);
-  if (p->frame)
-    frame_free (p->frame);
+  page_destruct_frame (p);
   free (p);
+}
+
+/* Waits until P's frame eviction completes, if being processed,
+   and then removes it if possible.
+   It is used by page_hash_free() and page_remove_entry().
+   
+   During the eviction of physical frame, the corresponding FTE
+   is pinned, that is, between the time the FTE was pinned inside
+   the function frame_get_victim() and the last time it was
+   unpinned inside the function page_load().
+
+   It is unsafe to free or remove P's allocated frame, or even P
+   itself, without waiting:
+
+   Suppose that a frame is evicted from SPTE SRC of process P1 to
+   DST of P2.  See frame_do_eviction().  To deprive SRC of its
+   FTE and physical frame, P2 should reference SRC and SRC's FRAME
+   member.  However, after context switch, if P2 removes and frees
+   SRC and allocated frame which is being evicted, whether by exit
+   or explicit call to page_remove_entry(), P2's referencing is
+   invalid. */
+static void
+page_destruct_frame (struct page *p)
+{
+  struct frame *f = p->frame;
+
+  /* P owns F. */
+  if (f != NULL)
+    {
+      /* If F is a victim frame, wait until frame F is
+         being evicted; otherwise do not enter this loop. */
+      while (!frame_try_pin (f))
+        thread_yield ();
+      
+      /* From now on, F is pinned. */
+
+      if (p->frame == NULL)
+        {
+          /* F was evicted from P; during the eviction, the FRAME
+             member of P was set to NULL.  That is, P does not
+             own F anymore, thus unpin. */
+          frame_unpin (f);
+        }
+      else
+        {
+          /* F was not a victim; P owns F with pin.
+             It is safe to free F because it cannot be a victim
+             anymore. */
+          frame_free (f);
+        }
+    }
 }
 
 /* Creates a SPTE to load a user virtual page at UPAGE,
@@ -174,6 +226,7 @@ page_load (void *upage)
   if (!install_page (upage, f->kpage, p->writable)) 
     goto fail;
 
+  frame_unpin (f);
   return true;
 
  fail:

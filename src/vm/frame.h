@@ -32,11 +32,16 @@ struct frame
        See page.h. */
     struct page *page;
 
+    bool pinned;
+
     struct list_elem list_elem;
   };
 
 void frame_init (void);
 struct frame *frame_alloc (struct page *);
 void frame_free (struct frame *);
+
+bool frame_try_pin (struct frame *);
+void frame_unpin (struct frame *);
 
 #endif /* vm/frame.h */

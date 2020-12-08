@@ -93,5 +93,4 @@ struct page *page_lookup (void *);
 
 bool page_was_accessed (struct page *);
 
-
 #endif /* vm/page.h */
