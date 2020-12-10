@@ -57,7 +57,7 @@ frame_alloc (struct page *p)
       /* F is locked until it is released inside
          page_load(). */
       lock_init (&f->lock);
-      lock_acquire (&f->lock);
+      frame_lock_acquire (f);
 
       /* One-to-one correspondence. */
       f->kpage = kpage;

@@ -88,7 +88,7 @@ page_hash_free (struct hash_elem *e, void *aux UNUSED)
    Suppose that a frame is evicted from SPTE SRC of process P1 to
    DST of P2.  See frame_do_eviction().  To deprive SRC of its
    FTE and physical frame, P2 should reference SRC and SRC's FRAME
-   member.  However, after context switch, if P2 removes and frees
+   member.  However, after context switch, if P1 removes and frees
    SRC and allocated frame which is being evicted, whether by exit
    or explicit call to page_remove_entry(), P2's referencing is
    invalid. */

@@ -35,7 +35,7 @@ enum page_type
    page point to each other. */
 struct page
   {
-    /* UPAGE identidies each corresponding SPTE, and it is used
+    /* UPAGE identifies each corresponding SPTE, and it is used
        as hash key of OWNER's supplemental page table. */
     void *upage;
     struct thread *owner;
@@ -56,7 +56,7 @@ struct page
        will be writable as well. */
     bool writable;
 
-    /* If DIRTY is false, the contents of UPAGE has not beend
+    /* If DIRTY is false, the contents of UPAGE has not been
        modified; otherwise the contents has been changed at least
        once.
        

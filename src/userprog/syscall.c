@@ -708,7 +708,7 @@ static void do_munmap (struct mmap *, bool);
    filled with zeros.
    
    If successful, this function returns a mapping id that
-   uniquely indentifies the mmap mapping within the process.
+   uniquely identifies the mmap mapping within the process.
    On failure, it returns -1 and the process's mappings are
    unchanged.
 
