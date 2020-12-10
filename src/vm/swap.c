@@ -26,7 +26,7 @@ void
 swap_init (void)
 {
   if (!(swap_bdev = block_get_role (BLOCK_SWAP)))
-    PANIC ("possible?");
+    PANIC ("no block device has been assigned BLOCK_SWAP.");
 
   swap_slots = block_size (swap_bdev) / PAGE_SECTOR_CNT;
   used_map = bitmap_create (swap_slots);
