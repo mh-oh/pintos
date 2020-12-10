@@ -64,7 +64,12 @@ static void
 page_hash_free (struct hash_elem *e, void *aux UNUSED)
 {
   struct page *p = hash_entry (e, struct page, hash_elem);
+
   wait_and_destruct_frame (p);
+
+  if (p->slot != BITMAP_ERROR)
+    swap_free (p->slot);
+
   free (p);
 }
 
@@ -169,6 +174,10 @@ page_remove_entry (struct page *p)
   ASSERT (p != NULL);
 
   wait_and_destruct_frame (p);
+
+  if (p->slot != BITMAP_ERROR)
+    swap_free (p->slot);
+
   hash_delete (p->owner->spt, &p->hash_elem);
   free (p);
 }

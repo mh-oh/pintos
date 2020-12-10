@@ -20,6 +20,8 @@ static struct bitmap *used_map;
 /* Number of swap slots. */
 static size_t swap_slots;
 
+/* Initializes the swap slot allocator.  At most SWAP_SLOTS
+   slots are available. */
 void
 swap_init (void)
 {
@@ -35,6 +37,9 @@ swap_init (void)
   lock_init (&swap_lock);
 }
 
+/* Writes PGSIZE bytes to a free slot from KPAGE.  Returns the
+   index of the free slot. 
+   If too few slots are available, kernel panics. */
 size_t
 swap_out (void* kpage)
 {
@@ -62,6 +67,7 @@ swap_out (void* kpage)
     PANIC ("cannot find any free swap slot.");
 }
 
+/* Reads PGSIZE bytes from SLOT into KPAGE and frees SLOT. */
 void
 swap_in (void *kpage, size_t slot)
 {
@@ -79,5 +85,15 @@ swap_in (void *kpage, size_t slot)
     }
 
   ASSERT (bitmap_all (used_map, slot, 1));
+  bitmap_set_multiple (used_map, slot, 1, false);
+}
+
+/* Just frees SLOT. */
+void
+swap_free (size_t slot)
+{
+  ASSERT (slot != BITMAP_ERROR);
+  ASSERT (bitmap_all (used_map, slot, 1));
+  
   bitmap_set_multiple (used_map, slot, 1, false);
 }
