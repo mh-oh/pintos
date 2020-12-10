@@ -9,12 +9,15 @@
 #include "threads/synch.h"
 #include "threads/malloc.h"
 #include "userprog/process.h"
+#include "userprog/pagedir.h"
 #include "devices/shutdown.h"
 #include "devices/input.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#ifdef VM
 #include "vm/page.h"
 #include "vm/frame.h"
+#endif
 
 static void syscall_handler (struct intr_frame *);
 
