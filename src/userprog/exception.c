@@ -5,12 +5,15 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+static bool stack_access (void *, void *);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -127,6 +130,7 @@ page_fault (struct intr_frame *f)
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
+  void *fault_page;  /* Fault page. */
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -136,6 +140,7 @@ page_fault (struct intr_frame *f)
      [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
      (#PF)". */
   asm ("movl %%cr2, %0" : "=r" (fault_addr));
+  fault_page = pg_round_down (fault_addr);
 
   /* Turn interrupts back on (they were only off so that we could
      be assured of reading CR2 before it changed). */
@@ -148,6 +153,56 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+
+#ifdef VM
+  struct thread *cur = thread_current ();
+  struct page *p;
+  void *esp;
+
+  /* We need to obtain the current value of the user program's
+     stack pointer.
+
+     If a page fault occurs in the user program, we can retrieve it
+     from the ESP member of the intr_frame F.  On the other hand,
+     we cannot retrieve it from F if a page fault occured in the
+     kernel, because the processor only saves the stack pointer when
+     an exception causes a "switch" from user to kernel mode.
+     So we've saved ESP into struct thread on the initial transition
+     from user to kernel mode. */
+  esp = user ? f->esp : cur->saved_esp;
+
+  /* Stack growth.
+     Control flow reaches the below code segment which supports
+     lazy loading. */
+  if (stack_access (fault_addr, esp))
+    {
+      p = page_make_entry (fault_page);
+      if (p != NULL)
+        {
+          /* Add supplemental information. */
+          p->type = PG_ZERO;
+          p->writable = true;
+        }
+    }
+
+  /* Because executable code and data segments are not immediately
+     loaded in memory during process setup, a not-present page fault
+     occurs when a process accesses unloaded segments later.
+     In this case, the page fault handler should load the user virtual
+     pages and resume the process's execution.
+
+     In order for the handler to know how to load the fault page, each
+     process has already created SPTEs.
+     See load_segment() defined in userprog/process.c.
+     
+     Similarly, stack growth is considered as lazy loading. */
+  if (not_present)
+    {
+      if (!page_load (fault_page))
+        sys_exit (-1);
+      return;
+    }
+#endif
 
   /* A page fault in the kernel merely sets EAX to 0xffffffff and
      copies its former value into EIP. This enables returning a -1
@@ -175,3 +230,22 @@ page_fault (struct intr_frame *f)
   kill (f);
 }
 
+/* Absolute limit on stack growth size, 8 MB. */
+#define STACK_MAX_SIZE (8 * 1024 * 1024)
+
+/* Checks whether the stack growth is needed or not.
+
+   Additional stack pages must be allocated only if they "appear" to be
+   stack accesses.
+   
+   Notice that the 80x86 PUSH instruction checks access permissions before
+   it adjusts the stack pointer, so it may cause a page fault 4 bytes
+   below the stack pointer.  Similarly, the PUSHA instruction pushes 32 bytes
+   at once, so it can fault 32 bytes below the stack pointer. */
+static bool
+stack_access (void *vaddr, void *esp)
+{
+  return vaddr > (PHYS_BASE - STACK_MAX_SIZE)
+         && vaddr <= (PHYS_BASE - 1)
+         && vaddr >= (esp - 32);
+}
